@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Cartomanzia",
+    "slug": "cartomanzia",
+    "version": "1.0.0",
+    "scheme": "cartomanzia",
+    "platforms": ["ios", "android", "web"],
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#140d2e"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}
