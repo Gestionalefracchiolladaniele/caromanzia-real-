@@ -1,0 +1,11 @@
+{
+  "common": {
+    "ok": "Ok",
+    "cancel": "Annulla",
+    "save": "Salva",
+    "close": "Chiudi",
+    "back": "Indietro",
+    "next": "Avanti",
+    "loading": "Caricamento..."
+  }
+}
