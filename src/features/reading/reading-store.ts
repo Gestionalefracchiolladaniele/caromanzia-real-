@@ -1,7 +1,17 @@
 import { create } from 'zustand';
 
+import { Storage } from '@/lib/storage';
 import type { PriorReadingSummary } from '@/lib/gemini';
 import type { DeckType, DreamSymbol, EmotionalState, LifeArea, TarotCard, Urgency } from '@/types';
+
+const PERSIST_KEY = 'reading_in_progress';
+
+// Fasi che vale la pena persistere (esclude transient come deck_selection)
+const PERSISTABLE_PHASES: ReadingPhase[] = [
+  'questionnaire', 'shuffling', 'revealing', 'interpreting',
+  'followup', 'saving', 'dream_input',
+  'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4',
+];
 
 export type ReadingPhase =
   | 'questionnaire'
@@ -58,6 +68,9 @@ interface ReadingState {
   priorReadings: PriorReadingSummary[];
   // Follow-up da lettura precedente
   followupFrom: FollowupFrom | null;
+  // Letture selezionate come contesto da History
+  contextReadingIds: string[];
+  contextReadingSummaries: string[];
   // Contesto libero e domanda opzionale
   freeContext: string;
   userQuestion: string;
@@ -88,6 +101,11 @@ interface ReadingState {
   addFollowup: (question: string, answer: string) => void;
   setPriorReadings: (prior: PriorReadingSummary[]) => void;
   setFollowupFrom: (from: FollowupFrom | null) => void;
+  setContextReadings: (ids: string[], summaries: string[]) => void;
+  saveToStorage: () => void;
+  restoreFromStorage: () => boolean;
+  clearStorage: () => void;
+  hasPersisted: () => boolean;
   // Dream mode
   setDreamText: (text: string) => void;
   setExtractedSymbols: (symbols: DreamSymbol[]) => void;
@@ -103,6 +121,7 @@ const INITIAL: Pick<
   | 'freeContext' | 'userQuestion'
   | 'dreamText' | 'extractedSymbols' | 'dreamQuestion'
   | 'celticPhase' | 'celticPhaseTexts'
+  | 'contextReadingIds' | 'contextReadingSummaries'
 > = {
   phase: 'deck_selection',
   emotionalState: null,
@@ -117,6 +136,8 @@ const INITIAL: Pick<
   followups: [],
   priorReadings: [],
   followupFrom: null,
+  contextReadingIds: [],
+  contextReadingSummaries: [],
   freeContext: '',
   userQuestion: '',
   dreamText: '',
@@ -166,6 +187,9 @@ export const useReadingStore = create<ReadingState>((set) => ({
 
   setFollowupFrom: (followupFrom) => set({ followupFrom }),
 
+  setContextReadings: (contextReadingIds, contextReadingSummaries) =>
+    set({ contextReadingIds, contextReadingSummaries }),
+
   setFreeContext: (freeContext) => set({ freeContext }),
 
   setUserQuestion: (userQuestion) => set({ userQuestion }),
@@ -176,5 +200,74 @@ export const useReadingStore = create<ReadingState>((set) => ({
 
   setDreamQuestion: (dreamQuestion) => set({ dreamQuestion }),
 
-  reset: () => set(INITIAL),
+  saveToStorage: () => {
+    const s = useReadingStore.getState();
+    if (!PERSISTABLE_PHASES.includes(s.phase)) return;
+    try {
+      const payload = {
+        phase: s.phase,
+        deckType: s.deckType,
+        emotionalState: s.emotionalState,
+        lifeArea: s.lifeArea,
+        urgency: s.urgency,
+        cards: s.cards,
+        aiText: s.aiText,
+        followups: s.followups,
+        freeContext: s.freeContext,
+        userQuestion: s.userQuestion,
+        dreamText: s.dreamText,
+        celticPhase: s.celticPhase,
+        celticPhaseTexts: s.celticPhaseTexts,
+      };
+      Storage.set(PERSIST_KEY, JSON.stringify(payload));
+    } catch {}
+  },
+
+  restoreFromStorage: () => {
+    try {
+      const raw = Storage.getString(PERSIST_KEY);
+      if (!raw) return false;
+      const payload = JSON.parse(raw);
+      if (!payload.phase || !PERSISTABLE_PHASES.includes(payload.phase)) return false;
+      const restoredCards = payload.cards ?? [];
+      // Se la lettura era già in revealing/interpreting/followup, le carte sono già tutte visibili
+      const phasesWithAllRevealed = ['interpreting', 'followup', 'saving',
+        'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'];
+      const revealedCount = phasesWithAllRevealed.includes(payload.phase)
+        ? restoredCards.length
+        : payload.phase === 'revealing' ? restoredCards.length : 0;
+      set({
+        phase: payload.phase,
+        deckType: payload.deckType ?? null,
+        emotionalState: payload.emotionalState ?? null,
+        lifeArea: payload.lifeArea ?? null,
+        urgency: payload.urgency ?? null,
+        cards: restoredCards,
+        revealedCount,
+        aiText: payload.aiText ?? '',
+        followups: payload.followups ?? [],
+        freeContext: payload.freeContext ?? '',
+        userQuestion: payload.userQuestion ?? '',
+        dreamText: payload.dreamText ?? '',
+        celticPhase: payload.celticPhase ?? 0,
+        celticPhaseTexts: payload.celticPhaseTexts ?? [],
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  clearStorage: () => {
+    try { Storage.delete(PERSIST_KEY); } catch {}
+  },
+
+  hasPersisted: () => {
+    try { return Storage.contains(PERSIST_KEY); } catch { return false; }
+  },
+
+  reset: () => {
+    try { Storage.delete(PERSIST_KEY); } catch {}
+    set(INITIAL);
+  },
 }));

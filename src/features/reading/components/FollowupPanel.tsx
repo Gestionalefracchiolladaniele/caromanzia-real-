@@ -24,9 +24,13 @@ interface FollowupPanelProps {
   followups: Array<{ question: string; answer: string }>;
   onAskFollowup: (question: string) => void;
   maxFollowups?: number;
+  ttsOn?: boolean;
+  isPlaying?: boolean;
+  onPlayTts?: () => void;
+  onPauseTts?: () => void;
 }
 
-export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, maxFollowups = 3 }: FollowupPanelProps) {
+export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, maxFollowups = 3, ttsOn = false, isPlaying = false, onPlayTts, onPauseTts }: FollowupPanelProps) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<ScrollView>(null);
   const canAsk = followups.length < maxFollowups && !isStreaming;
@@ -52,16 +56,28 @@ export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, m
       >
         {/* Initial AI interpretation */}
         {aiText.length > 0 && (
-          <View style={styles.bubbleWrap}>
-            <View style={styles.skullIcon}>
-              <ParticlesIcon size={28} />
+          <View style={styles.aiBlock}>
+            <View style={styles.bubbleWrap}>
+              <View style={styles.skullIcon}>
+                <ParticlesIcon size={28} />
+              </View>
+              <View style={styles.bubble}>
+                <Text style={styles.bubbleText}>{aiText}</Text>
+                {isStreaming && followups.length === 0 && (
+                  <ActivityIndicator size="small" color="#D4AF37" style={styles.spinner} />
+                )}
+              </View>
             </View>
-            <View style={styles.bubble}>
-              <Text style={styles.bubbleText}>{aiText}</Text>
-              {isStreaming && followups.length === 0 && (
-                <ActivityIndicator size="small" color="#D4AF37" style={styles.spinner} />
-              )}
-            </View>
+            {ttsOn && aiText.length > 0 && !isStreaming && (
+              <View style={styles.ttsControls}>
+                <Pressable
+                  style={[styles.ttsBtn, isPlaying && styles.ttsBtnActive]}
+                  onPress={isPlaying ? onPauseTts : onPlayTts}
+                >
+                  <Text style={styles.ttsBtnText}>{isPlaying ? '⏸ Pausa' : '🔊 Leggi'}</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         )}
 
@@ -286,5 +302,31 @@ const styles = StyleSheet.create({
     fontFamily: 'Georgia',
     fontSize: 11,
     letterSpacing: 0.5,
+  },
+  aiBlock: {
+    gap: 8,
+  },
+  ttsControls: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  ttsBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(212,175,55,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.4)',
+  },
+  ttsBtnActive: {
+    backgroundColor: 'rgba(212,175,55,0.3)',
+    borderColor: '#D4AF37',
+  },
+  ttsBtnText: {
+    color: '#D4AF37',
+    fontFamily: 'Georgia',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -17,9 +18,9 @@ import { BioStep } from '@/features/onboarding/steps/BioStep';
 import { SubscriptionStep } from '@/features/onboarding/steps/SubscriptionStep';
 import { useAuthStore } from '@/lib/auth-store';
 
-type Step = 'role' | 'avatar' | 'bio' | 'subscription';
+type Step = 'role' | 'avatar' | 'bio' | 'subscription' | 'welcome';
 
-const STEP_NUMBERS: Record<Step, number> = {
+const STEP_NUMBERS: Record<Exclude<Step, 'welcome'>, number> = {
   role: 0, avatar: 1, bio: 2, subscription: 3,
 };
 
@@ -28,10 +29,51 @@ const STEP_MESSAGES: Record<Step, string> = {
   avatar:       'Il tuo volto',
   bio:          'La tua essenza',
   subscription: 'Il tuo piano',
+  welcome:      'Il tuo viaggio inizia ora',
 };
+
+function WelcomeScreen({ userName }: { userName: string }) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.85)).current;
+  const dissipateAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    // Entrata: fade in + scale up
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.spring(scaleAnim, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }),
+    ]).start(() => {
+      // Pausa 2.5s poi dissipazione
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(fadeAnim, { toValue: 0, duration: 1200, useNativeDriver: true }),
+          Animated.timing(scaleAnim, { toValue: 1.15, duration: 1200, useNativeDriver: true }),
+          Animated.timing(dissipateAnim, { toValue: 0, duration: 1200, useNativeDriver: true }),
+        ]).start(() => {
+          router.replace('/(tabs)/impostazioni');
+        });
+      }, 2500);
+    });
+  }, []);
+
+  const name = userName ? userName.split(' ')[0] : 'Viaggiatore';
+
+  return (
+    <Animated.View style={[styles.welcomeScreen, { opacity: fadeAnim }]}>
+      <Animated.View style={[styles.welcomeContent, { transform: [{ scale: scaleAnim }], opacity: dissipateAnim }]}>
+        <DivineMascot message={`Benvenuto, ${name}`} width={380} />
+        <Text style={styles.welcomeTitle}>IL TUO VIAGGIO</Text>
+        <Text style={styles.welcomeSubtitle}>inizia ora</Text>
+        <View style={styles.welcomeDivider} />
+        <Text style={styles.welcomeTagline}>Gli arcani ti attendono</Text>
+      </Animated.View>
+    </Animated.View>
+  );
+}
 
 export default function OnboardingScreen() {
   const updateUser = useAuthStore((s) => s.updateUser);
+  const userName = useAuthStore((s) => s.user?.name ?? '');
   const [step, setStep] = useState<Step>('role');
 
   const handleRoleSelect = async (role: 'user' | 'cartomante') => {
@@ -46,13 +88,17 @@ export default function OnboardingScreen() {
   const handleFinish = async () => {
     try {
       await updateUser({ role_completed: true });
-      router.replace('/(tabs)/impostazioni');
+      setStep('welcome');
     } catch (e: any) {
       Alert.alert('Errore', e?.message ?? 'Errore nel completare il profilo');
     }
   };
 
-  const currentIdx = STEP_NUMBERS[step];
+  if (step === 'welcome') {
+    return <WelcomeScreen userName={userName} />;
+  }
+
+  const currentIdx = STEP_NUMBERS[step as Exclude<Step, 'welcome'>];
 
   return (
     <View style={styles.screen}>
@@ -160,5 +206,44 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#D4AF37',
     padding: 28,
+  },
+  welcomeScreen: {
+    flex: 1,
+    backgroundColor: '#140d2e',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  welcomeContent: {
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
+  },
+  welcomeTitle: {
+    color: '#D4AF37',
+    fontSize: 28,
+    fontFamily: 'Georgia',
+    letterSpacing: 6,
+    textTransform: 'uppercase',
+    marginTop: 16,
+  },
+  welcomeSubtitle: {
+    color: '#c4a878',
+    fontSize: 16,
+    fontFamily: 'Georgia',
+    letterSpacing: 3,
+    fontStyle: 'italic',
+  },
+  welcomeDivider: {
+    width: 60,
+    height: 1.5,
+    backgroundColor: '#D4AF37',
+    opacity: 0.5,
+    marginVertical: 8,
+  },
+  welcomeTagline: {
+    color: '#a890c8',
+    fontSize: 13,
+    fontFamily: 'Georgia',
+    letterSpacing: 2,
   },
 });

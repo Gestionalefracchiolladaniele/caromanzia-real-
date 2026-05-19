@@ -16,6 +16,7 @@ import { ElaborateFrame } from '@/components/ui/ElaborateFrame';
 import { TabBar, type TabId } from '@/components/ui/TabBar';
 import { TitleBox } from '@/components/ui/TitleBox';
 import { ALL_CARDS } from '@/features/reading/tarot-cards';
+import cardsIT from '@/data/tarot-cards-it.json';
 import type { TarotCard } from '@/types';
 
 type ArcanaFilter = 'tutti' | 'major' | 'denari' | 'coppe' | 'spade' | 'bastoni';
@@ -45,6 +46,16 @@ export default function CardsScreen() {
   const [reversed, setReversed] = useState(false);
 
   const handleNav = (id: TabId) => router.push(`/(tabs)/${id}` as any);
+
+  const getItalianCard = (card: TarotCard) => {
+    const itCard = cardsIT.cards.find((c: any) => c.name_short === card.id);
+    if (!itCard) return null;
+    return {
+      meaning_up: itCard.meaning_up,
+      meaning_rev: itCard.meaning_rev,
+      desc: itCard.desc,
+    };
+  };
 
   const filtered = useMemo(() => {
     let cards = allCards;
@@ -112,7 +123,7 @@ export default function CardsScreen() {
           contentContainerStyle={styles.grid}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <Pressable style={styles.cell} onPress={() => { setSelected(item); setReversed(false); }}>
+            <Pressable style={styles.cell} onPress={() => { setSelected({ ...item, reversed: false }); setReversed(false); }}>
               {item.image ? (
                 <Image source={item.image} style={styles.cardImg} />
               ) : (
@@ -170,15 +181,24 @@ export default function CardsScreen() {
                   ))}
                 </View>
 
-                {(reversed ? selected.meaning_rev : selected.meaning_up) && (
-                  <Text style={styles.meaning}>
-                    {reversed ? selected.meaning_rev : selected.meaning_up}
-                  </Text>
-                )}
+                {(() => {
+                  const itCard = getItalianCard(selected);
+                  const meaningText = reversed
+                    ? (itCard?.meaning_rev || selected.meaning_rev)
+                    : (itCard?.meaning_up || selected.meaning_up);
+                  const descText = itCard?.desc || selected.desc;
 
-                {selected.desc && (
-                  <Text style={styles.desc}>{selected.desc}</Text>
-                )}
+                  return (
+                    <>
+                      {meaningText && (
+                        <Text style={styles.meaning}>{String(meaningText)}</Text>
+                      )}
+                      {descText && (
+                        <Text style={styles.desc}>{String(descText)}</Text>
+                      )}
+                    </>
+                  );
+                })()}
               </ScrollView>
             </View>
           </View>

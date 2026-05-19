@@ -30,7 +30,6 @@ const USER_TABS: TabDef[] = [
 const CARTOMANTE_TABS: TabDef[] = [
   { id: 'home',         label: 'HOME',      icon: 'home' },
   { id: 'analytics',    label: 'ANALYTICS', icon: 'analytics' },
-  { id: 'readings',     label: 'LETTURE',   icon: 'reading' },
   { id: 'cards',        label: 'CARTE',     icon: 'cards' },
   { id: 'impostazioni', label: 'IMPOST.',   icon: 'impostazioni' },
 ];

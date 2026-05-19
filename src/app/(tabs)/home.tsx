@@ -29,6 +29,7 @@ import { useAuthStore, useIsCartomante } from '@/lib/auth-store';
 import { supabase } from '@/lib/supabase';
 import { trackProfileVisit, trackSocialClick } from '@/lib/profile-tracking';
 import { fetchSentPings } from '@/lib/supabase-notifications';
+import { getTodayDailyCard } from '@/lib/daily-ritual';
 import type { Cartomante, Notification, SocialLinks, User } from '@/types';
 
 
@@ -496,6 +497,10 @@ export default function HomeScreen() {
     if (!user?.id) return;
     fetchNotifications(user.id);
     const unsub = subscribeRealtime(user.id);
+    // Genera la daily card del giorno (se non esiste) e inserisce la notifica in-app
+    if (!isCartomante) {
+      getTodayDailyCard(user.id).catch(() => {});
+    }
     return unsub;
   }, [user?.id]);
 

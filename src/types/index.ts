@@ -4,13 +4,13 @@ export type SubscriptionStatus = 'free' | 'premium' | 'pro' | 'vip';
 
 export type EmotionalState = 'sad' | 'neutral' | 'good' | 'great';
 
-export type LifeArea = 'love' | 'work' | 'money' | 'health' | 'spiritual' | 'study' | 'relations';
+export type LifeArea = 'love' | 'work' | 'money' | 'health' | 'spiritual' | 'study' | 'relations' | 'generale';
 
 export type Urgency = 'past' | 'present' | 'future' | 'advice';
 
 export type ReadingMode = 'quick' | 'deep' | 'daily';
 
-export type DeckType = 'tre_carte' | 'celtic_cross' | 'sincronia' | 'sogni';
+export type DeckType = 'tre_carte' | 'celtic_cross' | 'sincronia' | 'sogni' | 'situazioni';
 
 export interface DreamSymbol {
   symbol: string;

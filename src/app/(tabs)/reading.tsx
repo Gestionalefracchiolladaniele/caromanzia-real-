@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
+  Easing,
   Image,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 import { DivineMascot } from '@/components/ui/DivineMascot';
 import { ElaborateFrame } from '@/components/ui/ElaborateFrame';
@@ -22,9 +24,14 @@ import { CelticCrossLayout } from '@/features/reading/components/CelticCrossLayo
 import { FollowupPanel } from '@/features/reading/components/FollowupPanel';
 import { drawCardsForDeck, drawCardsForDream, TRE_CARTE_POSITIONS, SINCRONIA_POSITIONS } from '@/features/reading/tarot-cards';
 import { useReadingStore, READING_MASCOT_MESSAGES } from '@/features/reading/reading-store';
-import { streamGeminiReading, streamGeminiFollowup, streamGeminiCelticPhase, selectDreamCards, generateReadingSummary } from '@/lib/gemini';
+import { streamGeminiReading, streamGeminiFollowup, streamGeminiCelticPhase, selectDreamCards, selectSituationCards, streamGeminiSituationInterpretation, generateReadingSummary } from '@/lib/gemini';
 import { useAuthStore } from '@/lib/auth-store';
 import { saveReading, fetchPriorReadings } from '@/lib/supabase-readings';
+import {
+  initAudio, playBackground, fadeOutBackground,
+  stopTts, pauseTts, resumeTts, setBgEnabled, setTtsEnabled, isBgEnabled, isTtsEnabled,
+} from '@/lib/audio-manager';
+import { speakText } from '@/lib/google-tts';
 import type { DeckType, EmotionalState, LifeArea, Urgency } from '@/types';
 
 /* ── Questionnaire data ── */
@@ -43,6 +50,7 @@ const LIFE_AREA_OPTIONS: { label: string; value: LifeArea }[] = [
   { label: '✨ Spirituale', value: 'spiritual' },
   { label: '🎓 Studio', value: 'study' },
   { label: '🤝 Relazioni', value: 'relations' },
+  { label: '🌐 Generale', value: 'generale' },
 ];
 
 const URGENCY_OPTIONS: { label: string; value: Urgency }[] = [
@@ -53,7 +61,7 @@ const URGENCY_OPTIONS: { label: string; value: Urgency }[] = [
 ];
 
 interface SpreadMode {
-  id: DeckType | 'sogni';
+  id: DeckType;
   icon: string;
   name: string;
   sub: string;
@@ -67,6 +75,7 @@ const SPREADS: SpreadMode[] = [
   { id: 'celtic_cross', icon: '✝', name: 'CROCE CELTICA', sub: 'Esplorazione Profonda', focus: 'Radici, Influenze, Esito', time: '~15 min', free: false },
   { id: 'sincronia', icon: '⚡', name: 'SINCRONICITÀ', sub: 'Risposta Sì/No', focus: 'Una domanda diretta', time: '~2 min', free: true },
   { id: 'sogni', icon: '🌙', name: 'SOGNI', sub: 'Interpretazione Onirica', focus: 'Simboli del sogno + AI', time: '~5 min', free: true },
+  { id: 'situazioni', icon: '🌟', name: 'SITUAZIONI', sub: 'Analisi Dinamiche', focus: 'Forze in gioco + risoluzioni', time: '~5 min', free: true },
 ];
 
 export default function ReadingScreen() {
@@ -80,7 +89,6 @@ export default function ReadingScreen() {
   const aiText = useReadingStore((s) => s.aiText);
   const isStreaming = useReadingStore((s) => s.isStreaming);
   const followups = useReadingStore((s) => s.followups);
-  const priorReadings = useReadingStore((s) => s.priorReadings);
   const followupFrom = useReadingStore((s) => s.followupFrom);
 
   const userId = useAuthStore((s) => s.user?.id);
@@ -126,6 +134,13 @@ export default function ReadingScreen() {
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [aiSummary, setAiSummary] = React.useState<string>('');
   const [summaryLoading, setSummaryLoading] = React.useState(false);
+  const [showResetConfirm, setShowResetConfirm] = React.useState(false);
+
+  // Audio state
+  const [musicOn, setMusicOn] = React.useState(isBgEnabled());
+  const [ttsOn, setTtsOn] = React.useState(isTtsEnabled());
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const ttsAbortRef = useRef<AbortController | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -138,17 +153,27 @@ export default function ReadingScreen() {
     new Animated.Value(0),
     new Animated.Value(0),
   ]).current;
+  // Pre-compute translateY per evitare new Animated.Value() nel render (causa drop frames)
+  const cardSwayTranslateY = useRef(
+    cardSwayAnims.map((anim) => anim.interpolate({ inputRange: [0, 1], outputRange: [0, -8] }))
+  ).current;
   const deckRotateAnim = useRef(new Animated.Value(0)).current;
   const deckSpreadAnim = useRef(new Animated.Value(0)).current;
-  const [bridgeFlashCount, setBridgeFlashCount] = useState(0);
 
-  const needsUrgency = deckType !== 'tre_carte' && deckType !== 'sogni';
-  const needsQuestion = deckType === 'sincronia';
+  const needsUrgency = deckType !== 'tre_carte' && deckType !== 'sogni' && deckType !== 'situazioni';
+  const needsQuestion = deckType === 'sincronia' || deckType === 'tre_carte';
   const needsDreamText = deckType === 'sogni';
+  const needsSituationText = deckType === 'situazioni';
   const canProceed = selEmotional !== null && selArea !== null
     && (needsUrgency ? selUrgency !== null : true)
     && (needsQuestion ? userQuestion.trim().length > 0 : true)
-    && (needsDreamText ? freeContext.trim().length > 0 : true);
+    && (needsDreamText ? freeContext.trim().length > 0 : true)
+    && (needsSituationText ? freeContext.trim().length > 0 : true);
+
+  // Auto-save stato lettura in MMKV ad ogni cambio di fase
+  useEffect(() => {
+    useReadingStore.getState().saveToStorage();
+  }, [phase]);
 
   // Carica prior readings quando entra nel questionnaire
   useEffect(() => {
@@ -187,71 +212,108 @@ export default function ReadingScreen() {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      ttsAbortRef.current?.abort();
       if (revealTimerRef.current) clearInterval(revealTimerRef.current);
       if (shuffleTimeoutRef.current) clearTimeout(shuffleTimeoutRef.current);
+      fadeOutBackground(800);
     };
   }, []);
 
-  // Auto-reveal cards during 'revealing' phase (non Celtic Cross)
+  // Init audio on mount
+  useEffect(() => {
+    initAudio().catch(() => {});
+  }, []);
+
+  // Avvia musica quando entra in shuffling, fermala quando salva/chiude
+  useEffect(() => {
+    if (['shuffling', 'revealing', 'interpreting', 'followup',
+         'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase)) {
+      playBackground().catch(() => {});
+    } else if (['saving', 'closing', 'deck_selection'].includes(phase)) {
+      fadeOutBackground(1200).catch(() => {});
+    }
+  }, [phase]);
+
+  // Parla il testo AI appena isStreaming finisce nella fase interpreting — solo se ttsOn
+  useEffect(() => {
+    if (isStreaming || !ttsOn || !aiText) return;
+    if (phase !== 'interpreting' && !['celtic_phase1','celtic_phase2','celtic_phase3','celtic_phase4'].includes(phase)) return;
+    setIsPlaying(true);
+    ttsAbortRef.current?.abort();
+    ttsAbortRef.current = new AbortController();
+    speakText(aiText, ttsAbortRef.current.signal)
+      .catch(() => {})
+      .finally(() => setIsPlaying(false));
+  }, [isStreaming, ttsOn]);
+
+  // AI parte in background appena entri in revealing (tutte le letture tranne Celtic Cross)
   useEffect(() => {
     if (phase !== 'revealing' || cards.length === 0 || deckType === 'celtic_cross') return;
-
-    const delay = cards.length <= 3 ? 700 : cards.length <= 5 ? 800 : 600;
-    let count = 0;
-
-    const timer = setInterval(() => {
-      count++;
-      revealNextCard();
-      if (count >= cards.length) {
-        clearInterval(timer);
-        setTimeout(() => startAIInterpretation(), 600);
-      }
-    }, delay);
-
-    revealTimerRef.current = timer;
-    return () => clearInterval(timer);
+    startAIBackgroundInterpretation();
   }, [phase, cards.length, deckType]);
 
-  async function startAIInterpretation() {
-    if (!emotionalState || !lifeArea || !urgency || !deckType) return;
-
-    setPhase('interpreting');
-    setIsStreaming(true);
+  async function startAIBackgroundInterpretation() {
+    const state = useReadingStore.getState();
+    const { emotionalState: es, lifeArea: la, urgency: urg, deckType: dt, cards: c, freeContext: fc, userQuestion: uq } = state;
+    if (!es || !la || !dt) return;
 
     abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
 
     const ctx = {
-      emotional_state: emotionalState,
-      life_area: lifeArea,
-      urgency,
-      deck_type: deckType,
-      cards,
-      free_context: freeContext.trim() || undefined,
-      user_question: userQuestion.trim() || undefined,
+      emotional_state: es,
+      life_area: la,
+      urgency: urg ?? 'present',
+      deck_type: dt,
+      cards: c,
+      free_context: fc.trim() || undefined,
+      user_question: uq.trim() || undefined,
     };
 
+    setIsStreaming(true);
+
     try {
-      await streamGeminiReading(
-        ctx,
-        (chunk) => appendAiText(chunk),
-        () => {
-          setIsStreaming(false);
-          setPhase('followup');
-        },
-        abortRef.current.signal,
-        priorReadings,
-        followupFrom?.summary,
-      );
+      if (dt === 'situazioni') {
+        await streamGeminiSituationInterpretation(
+          ctx,
+          (chunk) => appendAiText(chunk),
+          () => setIsStreaming(false),
+          signal,
+        );
+      } else {
+        await streamGeminiReading(
+          ctx,
+          (chunk) => appendAiText(chunk),
+          () => setIsStreaming(false),
+          signal,
+          state.priorReadings,
+          state.followupFrom?.summary,
+        );
+      }
     } catch {
       setIsStreaming(false);
-      setPhase('followup');
     }
   }
 
-  const maxFollowups = deckType === 'sincronia' ? 1 : deckType === 'tre_carte' ? 3 : deckType === 'celtic_cross' ? 5 : 3;
+  // Quando tutte le carte sono rivelate → vai a interpreting/followup
+  useEffect(() => {
+    if (phase !== 'revealing' || deckType === 'celtic_cross') return;
+    if (cards.length > 0 && revealedCount >= cards.length) {
+      setPhase('interpreting');
+    }
+  }, [revealedCount, cards.length, phase, deckType]);
+
+  function handleRevealCard() {
+    if (phase !== 'revealing' || deckType === 'celtic_cross') return;
+    if (revealedCount < cards.length) {
+      revealNextCard();
+    }
+  }
+
+  const maxFollowups = deckType === 'sincronia' ? 1 : deckType === 'tre_carte' ? 3 : deckType === 'celtic_cross' ? 5 : deckType === 'situazioni' ? 3 : 3;
 
   async function handleFollowup(question: string) {
-    if (!emotionalState || !lifeArea || !urgency || !deckType) return;
+    if (!emotionalState || !lifeArea || !deckType) return;
     if (followups.length >= maxFollowups) return;
 
     addFollowup(question, '');
@@ -289,7 +351,7 @@ export default function ReadingScreen() {
       // Usa il summary già pronto (generato in background), altrimenti fallback veloce
       const summary = aiSummary || aiText.slice(0, 200);
 
-      const reading = await saveReading({
+      await saveReading({
         user_id: userId,
         deck_type: deckType,
         cards,
@@ -300,6 +362,7 @@ export default function ReadingScreen() {
           life_area: lifeArea,
           urgency: urgency || 'present',
           deck_type: deckType,
+          cards,
           free_context: freeContext.trim() || undefined,
           user_question: userQuestion.trim() || undefined,
         },
@@ -319,8 +382,8 @@ export default function ReadingScreen() {
     }
   }
 
-  function handleStartDeck(id: DeckType | 'sogni') {
-    setDeck(id === 'sogni' ? 'sogni' : id as DeckType);
+  function handleStartDeck(id: DeckType) {
+    setDeck(id);
     setPhase('questionnaire');
   }
 
@@ -336,6 +399,18 @@ export default function ReadingScreen() {
       try {
         const [ids] = await Promise.all([
           selectDreamCards(freeContext.trim(), selEmotional!, selArea!),
+          new Promise((r) => setTimeout(r, 600)),
+        ]);
+        setCards(drawCardsForDream(ids as string[]));
+      } catch {
+        await new Promise((r) => setTimeout(r, 600));
+        setCards(drawCardsForDeck('tre_carte').concat(drawCardsForDeck('tre_carte').slice(0, 2)));
+      }
+      setPhase('revealing');
+    } else if (currentDeckType === 'situazioni') {
+      try {
+        const [ids] = await Promise.all([
+          selectSituationCards(freeContext.trim(), selEmotional!, selArea!),
           new Promise((r) => setTimeout(r, 600)),
         ]);
         setCards(drawCardsForDream(ids as string[]));
@@ -368,33 +443,33 @@ export default function ReadingScreen() {
 
   function animateShuffle(tap: number) {
     if (tap === 1) {
-      // TAP 1: swirl del mazzo
+      // TAP 1: swirl del mazzo con easing naturale
       Animated.sequence([
-        Animated.timing(deckRotateAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
-        Animated.timing(deckRotateAnim, { toValue: -0.5, duration: 200, useNativeDriver: true }),
-        Animated.timing(deckRotateAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+        Animated.timing(deckRotateAnim, { toValue: 1, duration: 350, easing: Easing.bezier(0.25, 0.1, 0.25, 1), useNativeDriver: true }),
+        Animated.timing(deckRotateAnim, { toValue: -0.5, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(deckRotateAnim, { toValue: 0, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }),
       ]).start();
-      // Le carte svolazzano
+      // Le carte svolazzano con staggering naturale
       cardSwayAnims.forEach((anim, i) => {
         Animated.sequence([
-          Animated.delay(i * 60),
-          Animated.timing(anim, { toValue: 1, duration: 300, useNativeDriver: true }),
-          Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: true }),
+          Animated.delay(i * 50),
+          Animated.timing(anim, { toValue: 1, duration: 260, easing: Easing.bezier(0.25, 0.1, 0.25, 1), useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0, duration: 260, easing: Easing.out(Easing.quad), useNativeDriver: true }),
         ]).start();
       });
     } else if (tap === 2) {
       // TAP 2: spread a ventaglio
       Animated.spring(deckSpreadAnim, {
         toValue: 1,
-        tension: 50,
-        friction: 7,
+        tension: 60,
+        friction: 8,
         useNativeDriver: true,
       }).start();
     } else if (tap === 3) {
-      // TAP 3: raccolta + fade out
+      // TAP 3: raccolta rapida + fade out
       Animated.parallel([
-        Animated.timing(deckSpreadAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        Animated.timing(bridgeScaleAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
+        Animated.timing(deckSpreadAnim, { toValue: 0, duration: 250, easing: Easing.bezier(0.25, 0.1, 0.25, 1), useNativeDriver: true }),
+        Animated.timing(bridgeScaleAnim, { toValue: 0, duration: 350, easing: Easing.in(Easing.quad), useNativeDriver: true }),
       ]).start();
     }
   }
@@ -402,7 +477,6 @@ export default function ReadingScreen() {
   function handleBridgeTap() {
     const newCount = shuffleTapCount + 1;
     incrementShuffleTap();
-    setBridgeFlashCount(newCount);
 
     // Animazione bounce bottone
     Animated.sequence([
@@ -418,8 +492,61 @@ export default function ReadingScreen() {
     }
   }
 
+  function handleToggleMusic() {
+    const next = !musicOn;
+    setMusicOn(next);
+    setBgEnabled(next);
+    if (next) playBackground().catch(() => {});
+  }
+
+  function handleToggleTts() {
+    const next = !ttsOn;
+    setTtsOn(next);
+    setTtsEnabled(next);
+    if (!next) {
+      ttsAbortRef.current?.abort();
+      stopTts().catch(() => {});
+      setIsPlaying(false);
+    }
+  }
+
+  function handlePlayTts() {
+    if (!ttsOn || !aiText) return;
+    if (isPlaying) {
+      pauseTts().catch(() => {});
+      setIsPlaying(false);
+    } else {
+      setIsPlaying(true);
+      ttsAbortRef.current?.abort();
+      ttsAbortRef.current = new AbortController();
+      resumeTts().catch(() => {
+        speakText(aiText, ttsAbortRef.current!.signal)
+          .catch(() => {})
+          .finally(() => setIsPlaying(false));
+      });
+    }
+  }
+
+  function handlePauseTts() {
+    pauseTts().catch(() => {});
+    setIsPlaying(false);
+  }
+
+  function handleRequestReset() {
+    const activePhases = ['shuffling', 'revealing', 'interpreting', 'followup',
+      'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'];
+    if (activePhases.includes(phase)) {
+      setShowResetConfirm(true);
+    } else {
+      handleReset();
+    }
+  }
+
   function handleReset() {
     abortRef.current?.abort();
+    ttsAbortRef.current?.abort();
+    stopTts().catch(() => {});
+    fadeOutBackground(800).catch(() => {});
     if (revealTimerRef.current) clearInterval(revealTimerRef.current);
     if (shuffleTimeoutRef.current) clearTimeout(shuffleTimeoutRef.current);
     revealStartedRef.current = false;
@@ -429,7 +556,6 @@ export default function ReadingScreen() {
     setSelUrgency(null);
     setFreeContext('');
     setUserQuestion('');
-    setBridgeFlashCount(0);
     bridgeScaleAnim.setValue(1);
     deckRotateAnim.setValue(0);
     deckSpreadAnim.setValue(0);
@@ -509,9 +635,30 @@ export default function ReadingScreen() {
     router.push(`/(tabs)/${id}` as any);
   };
 
+  // Modal conferma reset
+  const ResetConfirmModal = () => (
+    <Modal visible={showResetConfirm} transparent animationType="fade" onRequestClose={() => setShowResetConfirm(false)} statusBarTranslucent>
+      <View style={styles.confirmOverlay}>
+        <View style={styles.confirmBox}>
+          <Text style={styles.confirmTitle}>Interrompere la lettura?</Text>
+          <Text style={styles.confirmBody}>Interrompendo la lettura perderai tutti i progressi attuali. Vuoi proseguire?</Text>
+          <View style={styles.confirmButtons}>
+            <Pressable style={styles.confirmCancel} onPress={() => setShowResetConfirm(false)}>
+              <Text style={styles.confirmCancelText}>Annulla</Text>
+            </Pressable>
+            <Pressable style={styles.confirmProceed} onPress={() => { setShowResetConfirm(false); handleReset(); }}>
+              <Text style={styles.confirmProceedText}>Procedi</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   // ── Render phases ──
 
   if (phase === 'deck_selection') {
+    const hasSaved = useReadingStore.getState().hasPersisted();
     return (
       <View style={styles.screen}>
         <ElaborateFrame />
@@ -521,6 +668,14 @@ export default function ReadingScreen() {
           </View>
 
           <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {hasSaved && (
+              <Pressable
+                style={styles.resumeBanner}
+                onPress={() => useReadingStore.getState().restoreFromStorage()}
+              >
+                <Text style={styles.resumeBannerText}>🔮 Riprendi lettura interrotta →</Text>
+              </Pressable>
+            )}
             {SPREADS.map((sp) => (
               <View key={sp.id} style={styles.spreadCard}>
                 <View style={styles.spreadIcon}>
@@ -618,6 +773,33 @@ export default function ReadingScreen() {
                   numberOfLines={5}
                 />
               </>
+            ) : needsSituationText ? (
+              <>
+                <Text style={styles.sectionLabel}>Descrivi la situazione</Text>
+                <TextInput
+                  style={[styles.textArea, styles.textAreaTall]}
+                  value={freeContext}
+                  onChangeText={setFreeContext}
+                  placeholder="Descrivi la situazione in dettaglio: le persone coinvolte, le dinamiche, cosa ti preoccupa o ti incuriosisce…"
+                  placeholderTextColor="#5a4a70"
+                  multiline
+                  maxLength={500}
+                  numberOfLines={5}
+                />
+                <Text style={styles.sectionLabel}>
+                  Hai una domanda specifica? <Text style={styles.optionalLabel}>(opzionale)</Text>
+                </Text>
+                <TextInput
+                  style={styles.textArea}
+                  value={userQuestion}
+                  onChangeText={setUserQuestion}
+                  placeholder="Es: come si svilupperà questa situazione?"
+                  placeholderTextColor="#5a4a70"
+                  multiline
+                  maxLength={200}
+                  numberOfLines={2}
+                />
+              </>
             ) : (
               <>
                 <Text style={styles.sectionLabel}>
@@ -651,7 +833,7 @@ export default function ReadingScreen() {
 
             <GoldButton
               onPress={handleQuestionnaireSubmit}
-              style={[styles.proceedBtn, !canProceed && styles.proceedBtnDisabled]}
+              style={StyleSheet.flatten([styles.proceedBtn, !canProceed && styles.proceedBtnDisabled])}
             >
               INIZIA LA LETTURA →
             </GoldButton>
@@ -720,7 +902,7 @@ export default function ReadingScreen() {
                         { translateX: spreadX },
                         { rotate: swayRotate },
                         { rotate: i === 2 ? deckRotateDeg : '0deg' },
-                        { translateY: Animated.multiply(anim, new Animated.Value(-8)) },
+                        { translateY: cardSwayTranslateY[i] },
                       ],
                       zIndex: i,
                       opacity: tapsDone >= 3 ? 0.3 : 1,
@@ -858,93 +1040,121 @@ export default function ReadingScreen() {
   const hideTabBar = ['shuffling', 'revealing', 'interpreting', 'followup',
     'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase);
 
-  // Celtic Cross ha il suo layout completo
+  // Celtic Cross ha il suo layout — struttura uguale alle altre letture (revealZone + chatZone)
   if (deckType === 'celtic_cross' && ['revealing', 'interpreting', 'followup',
     'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase)) {
+
     return (
+      <>
       <View style={styles.screen}>
         <ElaborateFrame />
         <View style={styles.inner}>
-          <View style={styles.revealHeader}>
-            <Pressable onPress={handleReset} style={styles.resetBtn}>
-              <Text style={styles.resetBtnText}>✕ Nuova lettura</Text>
-            </Pressable>
-            {phase === 'followup' && (
-              <Pressable onPress={() => setPhase('saving')} style={styles.saveShortcutBtn}>
-                <Text style={styles.saveShortcutText}>Salva →</Text>
+          {/* revealZone: tutta l'altezza disponibile tranne userBar+audioBar */}
+          <View style={[styles.revealZone, phase !== 'followup' && { flex: 1 }]}>
+            <View style={styles.revealHeader}>
+              <Pressable onPress={handleRequestReset} style={styles.resetBtn}>
+                <Text style={styles.resetBtnText}>✕ Nuova lettura</Text>
               </Pressable>
+              {phase === 'followup' && (
+                <Pressable onPress={() => setPhase('saving')} style={styles.saveShortcutBtn}>
+                  <Text style={styles.saveShortcutText}>Salva →</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {phase !== 'followup' && (
+              <CelticCrossLayout
+                cards={cards}
+                celticPhase={celticPhase}
+                celticPhaseTexts={celticPhaseTexts}
+                isStreaming={isStreaming}
+                mascotMessage={READING_MASCOT_MESSAGES[phase] ?? undefined}
+                onRevealPhase={handleCelticRevealPhase}
+                onAskPhaseQuestion={handleCelticPhaseQuestion}
+                onProceedToFollowup={() => {
+                  const allText = celticPhaseTexts.join('\n\n');
+                  useReadingStore.setState({ aiText: allText });
+                  setPhase('followup');
+                }}
+              />
             )}
           </View>
 
-          {phase === 'followup' ? (
-            // Fase followup normale per Celtic Cross
-            <>
-              {/* Avatar bar */}
-              <View style={styles.readingUserBar}>
-                {userAvatar ? (
-                  <Image source={{ uri: userAvatar }} style={styles.readingUserAvatar} />
-                ) : (
-                  <View style={styles.readingUserAvatarPlaceholder}>
-                    <Text style={styles.readingUserAvatarInitial}>
-                      {(userName ?? 'U').slice(0, 1).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.readingUserInfo}>
-                  <Text style={styles.readingUserName}>{userName ?? 'Tu'}</Text>
-                  <Text style={styles.readingUserSub}>Lettura personale · Croce Celtica</Text>
-                </View>
+          {/* User bar — uguale alle altre letture */}
+          <View style={styles.readingUserBar}>
+            {userAvatar ? (
+              <Image source={{ uri: userAvatar }} style={styles.readingUserAvatar} />
+            ) : (
+              <View style={styles.readingUserAvatarPlaceholder}>
+                <Text style={styles.readingUserAvatarInitial}>
+                  {(userName ?? 'U').slice(0, 1).toUpperCase()}
+                </Text>
               </View>
-              <View style={styles.chatZone}>
-                <FollowupPanel
-                  aiText={aiText}
-                  isStreaming={isStreaming}
-                  followups={followups}
-                  onAskFollowup={handleFollowup}
-                  maxFollowups={maxFollowups}
-                />
-              </View>
-            </>
-          ) : (
-            // Fasi Celtic Cross progressive
-            <CelticCrossLayout
-              cards={cards}
-              celticPhase={celticPhase}
-              celticPhaseTexts={celticPhaseTexts}
-              isStreaming={isStreaming}
-              onRevealPhase={handleCelticRevealPhase}
-              onAskPhaseQuestion={handleCelticPhaseQuestion}
-              onProceedToFollowup={() => {
-                const allText = celticPhaseTexts.join('\n\n');
-                useReadingStore.setState({ aiText: allText });
-                setPhase('followup');
-              }}
-            />
+            )}
+            <View style={styles.readingUserInfo}>
+              <Text style={styles.readingUserName}>{userName ?? 'Tu'}</Text>
+              <Text style={styles.readingUserSub}>Lettura personale · Croce Celtica</Text>
+            </View>
+          </View>
+
+          {/* Audio controls */}
+          <View style={styles.audioBar}>
+            <Pressable onPress={handleToggleMusic} style={[styles.audioBtn, !musicOn && styles.audioBtnOff]}>
+              <Svg width="16" height="16" viewBox="0 0 24 24" fill={musicOn ? '#D4AF37' : '#5a4a30'}>
+                <Path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z" />
+              </Svg>
+              <Text style={[styles.audioBtnText, !musicOn && styles.audioBtnTextOff]}>
+                {musicOn ? 'Musica' : 'Musica off'}
+              </Text>
+            </Pressable>
+            <Pressable onPress={handleToggleTts} style={[styles.audioBtn, !ttsOn && styles.audioBtnOff]}>
+              <Svg width="16" height="16" viewBox="0 0 24 24" fill={ttsOn ? '#D4AF37' : '#5a4a30'}>
+                <Path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z" />
+              </Svg>
+              <Text style={[styles.audioBtnText, !ttsOn && styles.audioBtnTextOff]}>
+                {ttsOn ? 'Voce' : 'Voce off'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* chatZone: solo nel followup */}
+          {phase === 'followup' && (
+            <View style={styles.chatZone}>
+              <FollowupPanel
+                aiText={aiText}
+                isStreaming={isStreaming}
+                followups={followups}
+                onAskFollowup={handleFollowup}
+                maxFollowups={maxFollowups}
+                ttsOn={ttsOn}
+                isPlaying={isPlaying}
+                onPlayTts={handlePlayTts}
+                onPauseTts={handlePauseTts}
+              />
+            </View>
           )}
         </View>
       </View>
+      <ResetConfirmModal />
+      </>
     );
   }
 
   // Revealing + interpreting + followup phases — shared layout (non-Celtic)
   const mascotMsg = READING_MASCOT_MESSAGES[phase];
+  // DivineMascot: sempre visibile in revealing e interpreting (anche con testo)
+  const showMascot = phase === 'revealing' || phase === 'interpreting';
 
   return (
     <View style={styles.screen}>
       <ElaborateFrame />
       <View style={styles.inner}>
-        {mascotMsg && phase !== 'followup' && phase !== 'revealing' && (
-          <View style={styles.mascotBar}>
-            <DivineMascot message={mascotMsg} width={300} />
-          </View>
-        )}
-
         <View style={styles.revealZone}>
           <View style={styles.revealHeader}>
-            <Pressable onPress={handleReset} style={styles.resetBtn}>
+            <Pressable onPress={handleRequestReset} style={styles.resetBtn}>
               <Text style={styles.resetBtnText}>✕ Nuova lettura</Text>
             </Pressable>
-            {phase === 'interpreting' && <Text style={styles.phaseLabel}>Interpretazione…</Text>}
+            {phase === 'interpreting' && aiText.length === 0 && <Text style={styles.phaseLabel}>Le carte leggono…</Text>}
             {phase === 'followup' && (
               <Pressable onPress={() => setPhase('saving')} style={styles.saveShortcutBtn}>
                 <Text style={styles.saveShortcutText}>Salva →</Text>
@@ -952,17 +1162,32 @@ export default function ReadingScreen() {
             )}
           </View>
 
-          <CardReveal
-            cards={cards}
-            revealedCount={revealedCount}
-            positions={
-              deckType === 'sincronia' ? SINCRONIA_POSITIONS
-              : TRE_CARTE_POSITIONS
-            }
-          />
+          {/* DivineMascot overlay — non assoluto, sopra le carte */}
+          {showMascot && mascotMsg && (
+            <View style={styles.mascotContainer}>
+              <DivineMascot message={mascotMsg} width={280} />
+            </View>
+          )}
+
+          <Pressable
+            onPress={handleRevealCard}
+            style={styles.cardRevealPressable}
+            disabled={phase !== 'revealing' || revealedCount >= cards.length}
+          >
+            <CardReveal
+              cards={cards}
+              revealedCount={revealedCount}
+              deckType={deckType ?? undefined}
+              positions={
+                deckType === 'sincronia' ? SINCRONIA_POSITIONS
+                : deckType === 'sogni' || deckType === 'situazioni' ? undefined
+                : TRE_CARTE_POSITIONS
+              }
+            />
+          </Pressable>
         </View>
 
-        {/* Avatar + Name lettura personale — centrato e più grande */}
+        {/* Avatar + Name lettura personale */}
         <View style={styles.readingUserBar}>
           {userAvatar ? (
             <Image source={{ uri: userAvatar }} style={styles.readingUserAvatar} />
@@ -987,17 +1212,47 @@ export default function ReadingScreen() {
               followups={followups}
               onAskFollowup={handleFollowup}
               maxFollowups={maxFollowups}
+              ttsOn={ttsOn}
+              isPlaying={isPlaying}
+              onPlayTts={handlePlayTts}
+              onPauseTts={handlePauseTts}
             />
           )}
-          {phase === 'revealing' && (
+          {phase === 'revealing' && revealedCount < cards.length && (
             <View style={styles.revealingHint}>
-              <Text style={styles.revealingHintText}>Le carte si rivelano…</Text>
+              <Text style={styles.revealingHintText}>
+                TAP per rivelare · {revealedCount}/{cards.length}
+              </Text>
             </View>
           )}
         </View>
 
+        {/* Audio controls — visibili durante lettura attiva */}
+        {['interpreting', 'followup', 'revealing',
+          'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase) && (
+          <View style={styles.audioBar}>
+            <Pressable onPress={handleToggleMusic} style={[styles.audioBtn, !musicOn && styles.audioBtnOff]}>
+              <Svg width="16" height="16" viewBox="0 0 24 24" fill={musicOn ? '#D4AF37' : '#5a4a30'}>
+                <Path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z" />
+              </Svg>
+              <Text style={[styles.audioBtnText, !musicOn && styles.audioBtnTextOff]}>
+                {musicOn ? 'Musica' : 'Musica off'}
+              </Text>
+            </Pressable>
+            <Pressable onPress={handleToggleTts} style={[styles.audioBtn, !ttsOn && styles.audioBtnOff]}>
+              <Svg width="16" height="16" viewBox="0 0 24 24" fill={ttsOn ? '#D4AF37' : '#5a4a30'}>
+                <Path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z" />
+              </Svg>
+              <Text style={[styles.audioBtnText, !ttsOn && styles.audioBtnTextOff]}>
+                {ttsOn ? 'Voce' : 'Voce off'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {!hideTabBar && <TabBar active="reading" onChange={handleNav} />}
       </View>
+      <ResetConfirmModal />
     </View>
   );
 }
@@ -1242,16 +1497,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#D4AF37',
     borderColor: '#F0D060',
   },
-  mascotBar: {
+  mascotContainer: {
     alignItems: 'center',
-    paddingTop: 30,
-    paddingBottom: 2,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    pointerEvents: 'none',
+  },
+  celticMascotWrap: {
+    alignItems: 'center',
+    paddingVertical: 4,
   },
   revealZone: {
     flex: 5,
     paddingTop: 4,
     paddingHorizontal: 8,
     minHeight: 0,
+    justifyContent: 'flex-start',
+  },
+  cardRevealPressable: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 200,
   },
   revealHeader: {
     flexDirection: 'row',
@@ -1308,13 +1575,17 @@ const styles = StyleSheet.create({
   },
   readingUserInfo: {
     gap: 2,
+    flex: 1,
+    marginRight: 12,
   },
   readingUserName: {
     color: '#F0D060',
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: 'Georgia',
     fontWeight: '700',
     letterSpacing: 0.5,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
   },
   readingUserSub: {
     color: '#a890c8',
@@ -1491,5 +1762,117 @@ const styles = StyleSheet.create({
     fontFamily: 'Georgia',
     fontSize: 12,
     textAlign: 'center',
+  },
+  audioBar: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(20,13,46,0.85)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(139,112,32,0.2)',
+  },
+  audioBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(90,45,154,0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.4)',
+  },
+  audioBtnOff: {
+    backgroundColor: 'rgba(36,21,80,0.4)',
+    borderColor: 'rgba(90,74,48,0.3)',
+  },
+  audioBtnText: {
+    color: '#D4AF37',
+    fontSize: 11,
+    fontFamily: 'Georgia',
+  },
+  audioBtnTextOff: {
+    color: '#5a4a30',
+  },
+  resumeBanner: {
+    backgroundColor: 'rgba(90,45,154,0.4)',
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  resumeBannerText: {
+    color: '#F0D060',
+    fontFamily: 'Georgia',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10,6,25,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  confirmBox: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: 'rgba(36,21,80,0.98)',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+    padding: 24,
+    gap: 14,
+  },
+  confirmTitle: {
+    color: '#F0D060',
+    fontFamily: 'Georgia',
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+  confirmBody: {
+    color: '#c4a0f0',
+    fontFamily: 'Georgia',
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  confirmButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  confirmCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(212,175,55,0.4)',
+    alignItems: 'center',
+  },
+  confirmCancelText: {
+    color: '#a890c8',
+    fontFamily: 'Georgia',
+    fontSize: 14,
+  },
+  confirmProceed: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#D4AF37',
+    alignItems: 'center',
+  },
+  confirmProceedText: {
+    color: '#140d2e',
+    fontFamily: 'Georgia',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

@@ -13,7 +13,9 @@ import {
   View,
 } from 'react-native';
 
+import { DivineMascot } from '@/components/ui/DivineMascot';
 import type { TarotCard } from '@/types';
+import cardsIT from '@/data/tarot-cards-it.json';
 
 const POSITION_LABELS = [
   'Situazione',
@@ -67,11 +69,22 @@ const PHASE_DONE_LABELS = [
   'Destino svelato',
 ];
 
+function getItalianCard(card: TarotCard) {
+  const itCard = cardsIT.cards.find((c: any) => c.name_short === card.id);
+  if (!itCard) return null;
+  return {
+    meaning_up: itCard.meaning_up,
+    meaning_rev: itCard.meaning_rev,
+    desc: itCard.desc,
+  };
+}
+
 interface CelticCrossLayoutProps {
   cards: TarotCard[];
   celticPhase: number;
   celticPhaseTexts: string[];
   isStreaming: boolean;
+  mascotMessage?: string;
   onRevealPhase: (phaseIndex: number) => void;
   onAskPhaseQuestion: (phaseIndex: number, question: string) => void;
   onProceedToFollowup: () => void;
@@ -119,17 +132,28 @@ function CelticCardItem({
   const frontOpacity = flipAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 0, 1] });
   const backOpacity  = flipAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0, 0] });
 
+  // Dimensioni visive del wrapper (scambiate se ruotata)
+  const visW = rotated ? h : w;
+  const visH = rotated ? w : h;
+
   return (
-    <Pressable onPress={revealed ? onPress : undefined} style={{ width: w, height: h }}>
+    <Pressable onPress={revealed ? onPress : undefined} style={{ width: visW, height: visH, overflow: 'hidden' }}>
       {/* Dorso */}
-      <Animated.View style={[styles.cardFace, { width: w, height: h, opacity: backOpacity }]}>
-        <View style={[styles.cardBack, { width: w, height: h }, rotated && { transform: [{ rotate: '90deg' }] }]}>
+      <Animated.View style={[styles.cardFace, { width: visW, height: visH, opacity: backOpacity }]}>
+        <View style={[
+          styles.cardBack,
+          { width: w, height: h },
+          rotated && { transform: [{ rotate: '90deg' }], position: 'absolute', left: (visW - w) / 2, top: (visH - h) / 2 },
+        ]}>
           <Text style={styles.cardBackSymbol}>✦</Text>
         </View>
       </Animated.View>
       {/* Fronte */}
       <Animated.View style={[styles.cardFace, StyleSheet.absoluteFillObject, { opacity: frontOpacity }]}>
-        <View style={[{ width: w, height: h, overflow: 'hidden', borderRadius: 4 }, rotated && { transform: [{ rotate: '90deg' }] }]}>
+        <View style={[
+          { width: w, height: h, overflow: 'hidden', borderRadius: 4 },
+          rotated && { transform: [{ rotate: '90deg' }], position: 'absolute', left: (visW - w) / 2, top: (visH - h) / 2 },
+        ]}>
           {card.image ? (
             <Image
               source={card.image}
@@ -206,35 +230,55 @@ export function CelticCrossLayout({
   celticPhase,
   celticPhaseTexts,
   isStreaming,
+  mascotMessage,
   onRevealPhase,
   onAskPhaseQuestion,
   onProceedToFollowup,
 }: CelticCrossLayoutProps) {
-  const { width, height } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const [detail, setDetail] = useState<CardDetailModal | null>(null);
   const [questionsAsked, setQuestionsAsked] = useState<boolean[]>([false, false, false, false]);
+  const [layoutW, setLayoutW] = useState(0);
+  const [layoutH, setLayoutH] = useState(0);
 
-  const availW = width - 16;
-  const availH = height * 0.40;
-
-  const cw = Math.floor(availW * 0.13);
+  // Dimensioni carta piccole (10% larghezza)
+  const availW = (layoutW > 0 ? layoutW : width) - 16;
+  const cw = Math.floor(availW * 0.10);
   const ch = Math.floor(cw * 1.65);
 
-  const cx = availW * 0.33;
-  const cy = availH * 0.5;
-  const gap = cw * 1.15;
+  // Altezza reale misurata via onLayout, nessuna stima
+  const availH = layoutH;
+
+  // Posizioni calcolate solo quando abbiamo le dimensioni reali
+  // cy a 0.55 = centro croce spostato leggermente in basso per bilanciare visivamente
+  const cx = availW * 0.35;
+  const cy = availH > 0 ? availH * 0.55 : 0;
+  const gap = cw + 5;
+
+  // Colonna destra: 4 carte centrate su cy (stesso asse verticale della croce)
+  const colX = availW * 0.70;
+  const colTotalH = ch * 4 + 5 * 3;
+  const colStartY = cy - colTotalH / 2;
+  const colGap = ch + 5;
 
   const positions: { x: number; y: number; rotated?: boolean }[] = [
-    { x: cx - cw / 2,           y: cy - ch / 2 },
-    { x: cx - cw / 2,           y: cy - ch / 2, rotated: true },
-    { x: cx - cw / 2,           y: cy + gap },
-    { x: cx - gap - cw,         y: cy - ch / 2 },
-    { x: cx + gap,               y: cy - ch / 2 },
-    { x: cx - cw / 2,           y: cy - gap - ch },
-    { x: availW * 0.72,         y: cy + gap * 0.8 },
-    { x: availW * 0.72,         y: cy + gap * 0.8 - (ch + 6) },
-    { x: availW * 0.72,         y: cy + gap * 0.8 - (ch + 6) * 2 },
-    { x: availW * 0.72,         y: cy + gap * 0.8 - (ch + 6) * 3 },
+    // 0: Situazione (centro)
+    { x: cx - cw / 2,     y: cy - ch / 2 },
+    // 1: Ostacolo (sovrapposta, ruotata 90°)
+    { x: cx - ch / 2,     y: cy - cw / 2, rotated: true },
+    // 2: Fondamenta (sotto)
+    { x: cx - cw / 2,     y: cy + ch / 2 + 5 },
+    // 3: Passato (sinistra)
+    { x: cx - cw - gap,   y: cy - ch / 2 },
+    // 4: Avvenire (destra della croce)
+    { x: cx + cw / 2 + 5, y: cy - ch / 2 },
+    // 5: Alto
+    { x: cx - cw / 2,     y: cy - ch - ch / 2 - 5 },
+    // 6-9: colonna destra dal basso verso l'alto
+    { x: colX, y: colStartY + colGap * 3 },
+    { x: colX, y: colStartY + colGap * 2 },
+    { x: colX, y: colStartY + colGap },
+    { x: colX, y: colStartY },
   ];
 
   // Calcola quante carte sono rivelate in base alla fase corrente
@@ -259,40 +303,64 @@ export function CelticCrossLayout({
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Layout geometrico */}
-      <View style={[styles.container, { height: availH }]}>
-        {cards.map((card, i) => {
-          if (i >= 10) return null;
-          const pos = positions[i];
-          const isRevealed = revealedIndices.has(i);
-          return (
-            <View
-              key={card.id + i}
-              style={[styles.positionWrap, { left: pos.x, top: pos.y, width: cw, height: ch, zIndex: i === 1 ? 10 : i }]}
-            >
-              <CelticCardItem
-                card={card}
-                index={i}
-                revealed={isRevealed}
-                w={cw}
-                h={ch}
-                rotated={pos.rotated}
-                onPress={() => setDetail({ card, positionIndex: i })}
-              />
-              {isRevealed && (
-                <View style={styles.posLabel}>
-                  <Text style={styles.posLabelText} numberOfLines={1}>{POSITION_LABELS[i]}</Text>
+      {/* DivineMascot — sopra le carte, altezza fissa */}
+      {mascotMessage && (
+        <View style={styles.mascotRow} pointerEvents="none">
+          <DivineMascot message={mascotMessage} width={240} />
+        </View>
+      )}
+
+      {/* measureWrap: occupa lo spazio rimanente, misura le dimensioni reali */}
+      <View
+        style={styles.measureWrap}
+        onLayout={(e) => {
+          const { width: w, height: h } = e.nativeEvent.layout;
+          if (w > 0 && w !== layoutW) setLayoutW(w);
+          if (h > 0 && h !== layoutH) setLayoutH(h);
+        }}
+      >
+        {/* Container carte: absoluteFillObject = occupa esattamente measureWrap */}
+        {layoutH > 0 && (
+          <View style={StyleSheet.absoluteFillObject}>
+            {cards.map((card, i) => {
+              if (i >= 10) return null;
+              const pos = positions[i];
+              const isRevealed = revealedIndices.has(i);
+              return (
+                <View
+                  key={card.id + i}
+                  style={[styles.positionWrap, {
+                    left: pos.x,
+                    top: pos.y,
+                    width: pos.rotated ? ch : cw,
+                    height: pos.rotated ? cw : ch,
+                    zIndex: i === 1 ? 10 : i,
+                  }]}
+                >
+                  <CelticCardItem
+                    card={card}
+                    index={i}
+                    revealed={isRevealed}
+                    w={cw}
+                    h={ch}
+                    rotated={pos.rotated}
+                    onPress={() => setDetail({ card, positionIndex: i })}
+                  />
+                  {isRevealed && (
+                    <View style={styles.posLabel}>
+                      <Text style={styles.posLabelText} numberOfLines={1}>{POSITION_LABELS[i]}</Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-          );
-        })}
+              );
+            })}
+          </View>
+        )}
       </View>
 
-      {/* Controlli fasi + interpretazioni */}
+      {/* Controlli fasi + interpretazioni — scrollabili sotto le carte */}
       <ScrollView style={styles.phasesScroll} contentContainerStyle={styles.phasesContent} showsVerticalScrollIndicator={false}>
 
-        {/* Interpretazioni fasi già completate */}
         {celticPhaseTexts.map((text, i) => (
           <PhaseInterpretationBlock
             key={i}
@@ -304,7 +372,6 @@ export function CelticCrossLayout({
           />
         ))}
 
-        {/* Bottone prossima fase */}
         {hasNextPhase && !currentPhaseStreaming && (
           <Pressable
             style={styles.phaseRevealBtn}
@@ -315,7 +382,6 @@ export function CelticCrossLayout({
           </Pressable>
         )}
 
-        {/* Streaming in corso */}
         {currentPhaseStreaming && (
           <View style={styles.streamingRow}>
             <ActivityIndicator size="small" color="#D4AF37" />
@@ -323,10 +389,9 @@ export function CelticCrossLayout({
           </View>
         )}
 
-        {/* Tutte le fasi complete → passa a followup */}
         {allPhasesComplete && !isStreaming && (
           <Pressable style={styles.proceedBtn} onPress={onProceedToFollowup}>
-            <Text style={styles.proceedBtnText}>APPROFONDISCI LA LETTURA →</Text>
+            <Text style={styles.proceedBtnText}>INIZIA L'APPROFONDIMENTO →</Text>
           </Pressable>
         )}
       </ScrollView>
@@ -364,9 +429,13 @@ export function CelticCrossLayout({
                     </View>
                   ))}
                 </View>
-                {detail.card.desc ? (
-                  <Text style={styles.modalDesc}>{detail.card.desc}</Text>
-                ) : null}
+                {detail && (() => {
+                  const itCard = getItalianCard(detail.card);
+                  const descText = itCard?.desc || detail.card.desc;
+                  return descText ? (
+                    <Text style={styles.modalDesc}>{descText}</Text>
+                  ) : null;
+                })()}
               </ScrollView>
             </View>
           )}
@@ -377,6 +446,13 @@ export function CelticCrossLayout({
 }
 
 const styles = StyleSheet.create({
+  mascotRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  measureWrap: {
+    flex: 2,
+  },
   container: {
     position: 'relative',
     width: '100%',

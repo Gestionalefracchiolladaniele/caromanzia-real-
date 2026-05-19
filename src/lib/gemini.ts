@@ -37,6 +37,7 @@ const DECK_LABEL: Record<DeckType, string> = {
   celtic_cross: 'Celtic Cross (10 posizioni)',
   sincronia: 'Sincronicità Sì/No',
   sogni: 'Interpretazione Onirica',
+  situazioni: 'Interpretazione Situazione (5 carte)',
 };
 
 const EMOTIONAL_LABEL: Record<EmotionalState, string> = {
@@ -54,6 +55,7 @@ const LIFE_AREA_LABEL: Record<LifeArea, string> = {
   spiritual: 'crescita spirituale',
   study: 'studio e apprendimento',
   relations: 'relazioni (amici, famiglia)',
+  generale: 'vita in generale',
 };
 
 const URGENCY_LABEL: Record<Urgency, string> = {
@@ -68,7 +70,8 @@ function buildCardList(cards: TarotCard[]): string {
     .map((c, i) => {
       const orient = c.reversed ? '(rovesciata)' : '(diritta)';
       const kw = c.keywords.slice(0, 3).join(', ');
-      return `${i + 1}. ${c.name_it} ${orient} — ${kw}`;
+      const cardName = c.name_it || c.name || 'Carta Sconosciuta';
+      return `${i + 1}. ${cardName} ${orient} — ${kw}`;
     })
     .join('\n');
 }
@@ -126,13 +129,23 @@ export async function streamGeminiReading(
     return;
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-  const result = await model.generateContentStream(buildPrompt(ctx, prior, followupSummary));
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContentStream(buildPrompt(ctx, prior, followupSummary));
 
-  for await (const chunk of result.stream) {
-    if (signal?.aborted) break;
-    const text = chunk.text();
-    if (text) onChunk(text);
+    for await (const chunk of result.stream) {
+      if (signal?.aborted) break;
+      try {
+        const text = chunk.text();
+        if (text) onChunk(text);
+      } catch (e) {
+        console.warn('Reading chunk parse error, continuing:', e);
+        continue;
+      }
+    }
+  } catch (err) {
+    console.error('Gemini streaming error:', err);
+    onChunk('⚠️ Errore nella lettura IA. Riprova.');
   }
 
   onDone();
@@ -231,13 +244,23 @@ export async function streamGeminiDreamInterpretation(
     return;
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-  const result = await model.generateContentStream(buildDreamPrompt(ctx));
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContentStream(buildDreamPrompt(ctx));
 
-  for await (const chunk of result.stream) {
-    if (signal?.aborted) break;
-    const text = chunk.text();
-    if (text) onChunk(text);
+    for await (const chunk of result.stream) {
+      if (signal?.aborted) break;
+      try {
+        const text = chunk.text();
+        if (text) onChunk(text);
+      } catch (e) {
+        console.warn('Dream chunk parse error, continuing:', e);
+        continue;
+      }
+    }
+  } catch (err) {
+    console.error('Dream interpretation error:', err);
+    onChunk('⚠️ Errore interpretazione sogno. Riprova.');
   }
 
   onDone();
@@ -256,9 +279,10 @@ export async function streamGeminiFollowup(
     return;
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-  const prompt = `${CARTOMANTE_PERSONA}
+    const prompt = `${CARTOMANTE_PERSONA}
 
 Interpretazione appena fornita:
 ${previousAnswer}
@@ -267,12 +291,21 @@ L'utente chiede: "${followupQuestion}"
 
 Rispondi in modo preciso e diretto (max 80 parole). Mantieni il tono autorevole.`;
 
-  const result = await model.generateContentStream(prompt);
+    const result = await model.generateContentStream(prompt);
 
-  for await (const chunk of result.stream) {
-    if (signal?.aborted) break;
-    const text = chunk.text();
-    if (text) onChunk(text);
+    for await (const chunk of result.stream) {
+      if (signal?.aborted) break;
+      try {
+        const text = chunk.text();
+        if (text) onChunk(text);
+      } catch (e) {
+        console.warn('Followup chunk parse error, continuing:', e);
+        continue;
+      }
+    }
+  } catch (err) {
+    console.error('Followup error:', err);
+    onChunk('⚠️ Errore nel recupero approfondimento. Riprova.');
   }
 
   onDone();
@@ -312,20 +345,27 @@ export async function streamGeminiCelticPhase(
     return;
   }
 
-  const phaseLabel = CELTIC_PHASE_LABELS[ctx.phaseIndex];
-  const phaseCardList = ctx.phaseCards
-    .map((c) => `• ${c.name_it} ${c.reversed ? '(rovesciata)' : '(diritta)'} — ${c.keywords.slice(0, 3).join(', ')}`)
-    .join('\n');
+  try {
+    const phaseLabel = CELTIC_PHASE_LABELS[ctx.phaseIndex];
+    const phaseCardList = ctx.phaseCards
+      .map((c) => {
+        const cardName = c.name_it || c.name || 'Carta Sconosciuta';
+        return `• ${cardName} ${c.reversed ? '(rovesciata)' : '(diritta)'} — ${c.keywords.slice(0, 3).join(', ')}`;
+      })
+      .join('\n');
 
-  const allCardList = ctx.allRevealedCards
-    .map((c, i) => `${i + 1}. ${c.name_it} ${c.reversed ? '(rovesciata)' : '(diritta)'}`)
-    .join('\n');
+    const allCardList = ctx.allRevealedCards
+      .map((c, i) => {
+        const cardName = c.name_it || c.name || 'Carta Sconosciuta';
+        return `${i + 1}. ${cardName} ${c.reversed ? '(rovesciata)' : '(diritta)'}`;
+      })
+      .join('\n');
 
-  const prevTexts = ctx.previousPhaseTexts.length > 0
-    ? `\nInterpretazioni precedenti da integrare:\n${ctx.previousPhaseTexts.map((t, i) => `Fase ${i + 1}: ${t}`).join('\n\n')}\n`
-    : '';
+    const prevTexts = ctx.previousPhaseTexts.length > 0
+      ? `\nInterpretazioni precedenti da integrare:\n${ctx.previousPhaseTexts.map((t, i) => `Fase ${i + 1}: ${t}`).join('\n\n')}\n`
+      : '';
 
-  const prompt = `${CARTOMANTE_PERSONA}
+    const prompt = `${CARTOMANTE_PERSONA}
 
 Stai conducendo una lettura Celtic Cross (Croce Celtica) in modo progressivo, fase per fase.
 Area di vita: ${LIFE_AREA_LABEL[ctx.life_area]}
@@ -342,13 +382,119 @@ ${phaseCardList}
 
 Interpreta SOLO le carte di questa fase (max 100 parole), collegandole al contesto precedente se presente. Sii diretto e concreto. Non ripetere interpretazioni già date.`;
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-  const result = await model.generateContentStream(prompt);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContentStream(prompt);
 
-  for await (const chunk of result.stream) {
-    if (signal?.aborted) break;
-    const text = chunk.text();
-    if (text) onChunk(text);
+    for await (const chunk of result.stream) {
+      if (signal?.aborted) break;
+      try {
+        const text = chunk.text();
+        if (text) onChunk(text);
+      } catch (e) {
+        console.warn('Celtic phase chunk parse error, continuing:', e);
+        continue;
+      }
+    }
+  } catch (err) {
+    console.error('Celtic phase error:', err);
+    onChunk('⚠️ Errore fase Croce Celtica. Riprova.');
+  }
+
+  onDone();
+}
+
+// ─── Situazioni: selezione carte + interpretazione ───────────────────────────
+
+export async function selectSituationCards(
+  situationText: string,
+  emotionalState: EmotionalState,
+  lifeArea: LifeArea,
+): Promise<string[]> {
+  if (!GEMINI_API_KEY) return CARD_IDS.slice(0, 5);
+
+  const prompt = `Sei un esperto di tarocchi. Analizza questa situazione e scegli esattamente 5 carte dei tarocchi che rappresentano le dinamiche in gioco, le forze contrastanti e le possibili risoluzioni.
+
+Situazione: "${situationText}"
+Stato emotivo: ${emotionalState}
+Area di vita: ${LIFE_AREA_LABEL[lifeArea]}
+
+IDs disponibili: ${CARD_IDS.join(',')}
+
+Rispondi SOLO con 5 ID carta separati da virgola, nessun altro testo. Esempio: ar18,cu07,sw09,ar13,wa08`;
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+
+  const chosen = text
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((id) => CARD_IDS.includes(id))
+    .slice(0, 5);
+
+  if (chosen.length < 5) {
+    const fallback = CARD_IDS.filter((id) => !chosen.includes(id));
+    while (chosen.length < 5) chosen.push(fallback[chosen.length]);
+  }
+
+  return chosen;
+}
+
+const SITUATION_ANALYST_PERSONA = `Sei una cartomante con trent'anni di pratica negli arcani, specializzata nell'analisi delle situazioni complesse.
+Regole ferree:
+- Italiano formale, diretto, mai melodrammatico né vago
+- Ogni carta rappresenta una dinamica, una forza o un potenziale nella situazione descritta
+- Evidenzia le tensioni tra carte contrastanti e il loro significato nella situazione
+- Connetti le carte al contesto specifico dell'utente — niente interpretazioni generiche
+- Parla in prima persona singolare, come se stessi leggendo dal vivo
+- Max 180 parole. Chiudi con un'azione concreta o una domanda che tocchi il nucleo della questione`;
+
+export async function streamGeminiSituationInterpretation(
+  ctx: ReadingContext,
+  onChunk: (text: string) => void,
+  onDone: () => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!GEMINI_API_KEY) {
+    onChunk('⚠️ Chiave Gemini non configurata. Imposta EXPO_PUBLIC_GEMINI_API_KEY.');
+    onDone();
+    return;
+  }
+
+  try {
+    const situationText = (ctx.free_context ?? '').trim() || '(nessuna descrizione fornita)';
+    const prompt = `${SITUATION_ANALYST_PERSONA}
+
+Contesto dell'utente:
+- Stato emotivo: ${EMOTIONAL_LABEL[ctx.emotional_state]}
+- Area di vita: ${LIFE_AREA_LABEL[ctx.life_area]}
+${ctx.urgency ? `- Focus: ${URGENCY_LABEL[ctx.urgency]}` : ''}
+${ctx.user_question ? `- Domanda specifica: ${ctx.user_question}` : ''}
+
+Situazione descritta:
+"${situationText}"
+
+Carte estratte (rappresentano le dinamiche della situazione):
+${buildCardList(ctx.cards)}
+
+Fornisci un'interpretazione che analizzi le dinamiche in gioco, le forze contrastanti e i potenziali sviluppi della situazione. Parla direttamente all'utente usando "tu".`;
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContentStream(prompt);
+
+    for await (const chunk of result.stream) {
+      if (signal?.aborted) break;
+      try {
+        const text = chunk.text();
+        if (text) onChunk(text);
+      } catch (e) {
+        console.warn('Situation chunk parse error, continuing:', e);
+        continue;
+      }
+    }
+  } catch (err) {
+    console.error('Situation interpretation error:', err);
+    onChunk('⚠️ Errore interpretazione situazione. Riprova.');
   }
 
   onDone();

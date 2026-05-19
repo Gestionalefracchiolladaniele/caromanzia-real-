@@ -10,9 +10,13 @@ import {
   View,
 } from 'react-native';
 
-import type { TarotCard } from '@/types';
+import type { DeckType, TarotCard } from '@/types';
+import cardsIT from '@/data/tarot-cards-it.json';
 
-function getCardDimensions(total: number): { w: number; h: number } {
+function getCardDimensions(total: number, deckType?: DeckType): { w: number; h: number } {
+  if (deckType === 'sogni') return { w: 100, h: 166 };
+  if (deckType === 'sincronia') return { w: 130, h: 216 };
+  if (deckType === 'tre_carte') return { w: 96, h: 160 };
   if (total === 1) return { w: 120, h: 200 };
   if (total <= 3) return { w: 96, h: 160 };
   if (total <= 5) return { w: 80, h: 133 };
@@ -23,11 +27,12 @@ interface CardItemProps {
   card: TarotCard;
   index: number;
   total: number;
+  deckType?: DeckType;
   revealed: boolean;
   onPress: () => void;
 }
 
-function TarotCardItem({ card, index, total, revealed, onPress }: CardItemProps) {
+function TarotCardItem({ card, index, total, deckType, revealed, onPress }: CardItemProps) {
   const flipAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const hasAnimated = useRef(false);
@@ -55,7 +60,7 @@ function TarotCardItem({ card, index, total, revealed, onPress }: CardItemProps)
     }
   }, [revealed]);
 
-  const { w, h } = getCardDimensions(total);
+  const { w, h } = getCardDimensions(total, deckType);
 
   const rotateY = flipAnim.interpolate({
     inputRange: [0, 0.5, 1],
@@ -68,17 +73,40 @@ function TarotCardItem({ card, index, total, revealed, onPress }: CardItemProps)
   });
 
   const borderColor = card.reversed ? '#C0392B' : '#D4AF37';
+  const backOpacity = flipAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0, 0] });
 
   return (
-    <Animated.View
-      style={{
-        width: w,
-        height: h,
-        transform: [{ rotateY }, { scale: scaleAnim }],
-        opacity,
-      }}
-    >
-      <Pressable onPress={onPress} style={{ flex: 1 }}>
+    <Pressable onPress={onPress} style={{ width: w, height: h, overflow: 'hidden' }}>
+      {/* Dorso carta (quando non rivelata) */}
+      <Animated.View
+        style={[
+          styles.cardFace,
+          { width: w, height: h, opacity: backOpacity },
+        ]}
+      >
+        <View
+          style={[
+            styles.cardBack,
+            { width: w, height: h },
+          ]}
+        >
+          <Text style={styles.cardBackSymbol}>✦</Text>
+        </View>
+      </Animated.View>
+
+      {/* Fronte carta (quando rivelata) */}
+      <Animated.View
+        style={[
+          styles.cardFace,
+          StyleSheet.absoluteFillObject,
+          {
+            width: w,
+            height: h,
+            transform: [{ rotateY }, { scale: scaleAnim }],
+            opacity,
+          },
+        ]}
+      >
         <View
           style={[
             styles.cardInner,
@@ -124,8 +152,8 @@ function TarotCardItem({ card, index, total, revealed, onPress }: CardItemProps)
             </View>
           )}
         </View>
-      </Pressable>
-    </Animated.View>
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -136,6 +164,16 @@ interface DetailModalProps {
   onClose: () => void;
 }
 
+function getItalianCard(card: TarotCard) {
+  const itCard = cardsIT.cards.find((c: any) => c.name_short === card.id);
+  if (!itCard) return null;
+  return {
+    meaning_up: itCard.meaning_up,
+    meaning_rev: itCard.meaning_rev,
+    desc: itCard.desc,
+  };
+}
+
 function CardDetailModal({ card, onClose }: DetailModalProps) {
   if (!card) return null;
 
@@ -143,7 +181,12 @@ function CardDetailModal({ card, onClose }: DetailModalProps) {
   const gold = '#D4AF37';
   const red = '#C0392B';
   const accentColor = isReversed ? red : gold;
-  const meaning = isReversed ? card.meaning_rev : card.meaning_up;
+
+  const itCard = getItalianCard(card);
+  const meaning = isReversed
+    ? (itCard?.meaning_rev || card.meaning_rev)
+    : (itCard?.meaning_up || card.meaning_up);
+  const descText = itCard?.desc || card.desc;
   const keywords = isReversed ? card.reversed_keywords : card.keywords;
 
   return (
@@ -206,10 +249,10 @@ function CardDetailModal({ card, onClose }: DetailModalProps) {
             )}
 
             {/* Descrizione carta */}
-            {card.desc && (
+            {descText && (
               <>
                 <Text style={styles.modalSection}>Descrizione</Text>
-                <Text style={styles.modalDesc}>{card.desc}</Text>
+                <Text style={styles.modalDesc}>{descText}</Text>
               </>
             )}
           </ScrollView>
@@ -229,9 +272,10 @@ interface CardRevealProps {
   cards: TarotCard[];
   revealedCount: number;
   positions?: string[];
+  deckType?: DeckType;
 }
 
-export function CardReveal({ cards, revealedCount, positions }: CardRevealProps) {
+export function CardReveal({ cards, revealedCount, positions, deckType }: CardRevealProps) {
   const [selectedCard, setSelectedCard] = useState<TarotCard | null>(null);
   const total = cards.length;
 
@@ -241,6 +285,7 @@ export function CardReveal({ cards, revealedCount, positions }: CardRevealProps)
     <View style={styles.container}>
       <ScrollView
         horizontal={total > 5}
+        scrollEnabled={total > 5}
         contentContainerStyle={[
           styles.cardsRow,
           total > 5 && styles.cardsRowScroll,
@@ -254,6 +299,7 @@ export function CardReveal({ cards, revealedCount, positions }: CardRevealProps)
               card={card}
               index={i}
               total={total}
+              deckType={deckType}
               revealed={i < revealedCount}
               onPress={() => i < revealedCount && setSelectedCard(card)}
             />
@@ -272,7 +318,9 @@ export function CardReveal({ cards, revealedCount, positions }: CardRevealProps)
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 8,
   },
   cardsRow: {
@@ -282,11 +330,11 @@ const styles = StyleSheet.create({
   cardsRowCentered: {
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   cardsRowScroll: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   cardWrapper: {
     alignItems: 'center',

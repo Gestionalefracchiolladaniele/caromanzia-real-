@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -448,6 +449,88 @@ function useSocialClicks(cartomanteId: string, period: Period, customStart?: str
   return { stats, loading };
 }
 
+interface VisitorRow {
+  visitor_id: string;
+  name: string;
+  avatar_url: string | null;
+  last_visit: string;
+  visit_count: number;
+}
+
+function useVisitorList(cartomanteId: string, period: Period, customStart?: string, customEnd?: string) {
+  const [visitors, setVisitors] = useState<VisitorRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!cartomanteId) return;
+    let cancelled = false;
+    setLoading(true);
+
+    const run = async () => {
+      const since = getPeriodStart(period, customStart);
+      const until = getPeriodEnd(period, customEnd);
+
+      let q = supabase
+        .from('profile_visits')
+        .select('visitor_id, created_at')
+        .eq('cartomante_id', cartomanteId)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false });
+
+      if (until) q = q.lte('created_at', until);
+
+      const { data: rows } = await q.limit(200);
+      if (cancelled || !rows) { setLoading(false); return; }
+
+      // Raggruppa per visitor_id
+      const byVisitor: Record<string, { last_visit: string; count: number }> = {};
+      for (const row of rows) {
+        if (!byVisitor[row.visitor_id]) {
+          byVisitor[row.visitor_id] = { last_visit: row.created_at, count: 0 };
+        }
+        byVisitor[row.visitor_id].count += 1;
+        if (row.created_at > byVisitor[row.visitor_id].last_visit) {
+          byVisitor[row.visitor_id].last_visit = row.created_at;
+        }
+      }
+
+      const visitorIds = Object.keys(byVisitor);
+      if (visitorIds.length === 0) { setVisitors([]); setLoading(false); return; }
+
+      // Carica profili utenti
+      const { data: users } = await supabase
+        .from('users')
+        .select('id, name, avatar_url')
+        .in('id', visitorIds);
+
+      if (cancelled) return;
+
+      const userMap: Record<string, { name: string; avatar_url: string | null }> = {};
+      for (const u of (users ?? [])) {
+        userMap[u.id] = { name: u.name, avatar_url: u.avatar_url };
+      }
+
+      const result: VisitorRow[] = visitorIds
+        .sort((a, b) => byVisitor[b].last_visit.localeCompare(byVisitor[a].last_visit))
+        .map((id) => ({
+          visitor_id: id,
+          name: userMap[id]?.name ?? 'Utente',
+          avatar_url: userMap[id]?.avatar_url ?? null,
+          last_visit: byVisitor[id].last_visit,
+          visit_count: byVisitor[id].count,
+        }));
+
+      setVisitors(result);
+      setLoading(false);
+    };
+
+    run();
+    return () => { cancelled = true; };
+  }, [cartomanteId, period, customStart, customEnd]);
+
+  return { visitors, loading };
+}
+
 /* ─────────────────────────────────────────────
    LineChart — Reanimated-free, SVG nativo
 ───────────────────────────────────────────── */
@@ -803,6 +886,9 @@ export default function AnalyticsScreen() {
   const { stats: socialStats, loading: loadingSocial } =
     useSocialClicks(cartomanteId, period, customStart, customEnd);
 
+  const { visitors, loading: loadingVisitors } =
+    useVisitorList(cartomanteId, period, customStart, customEnd);
+
   const handleNav = (id: TabId) => {
     router.push(`/(tabs)/${id}` as any);
   };
@@ -818,7 +904,7 @@ export default function AnalyticsScreen() {
     setPeriod(p);
   };
 
-  const isLoading = loadingVisits || loadingSocial;
+  const isLoading = loadingVisits || loadingSocial || loadingVisitors;
 
   return (
     <View style={styles.screen}>
@@ -888,6 +974,45 @@ export default function AnalyticsScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Click Social</Text>
               <SocialBarChart stats={socialStats} />
+            </View>
+
+            {/* Utenti che ti hanno visitato */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                Chi ti ha visitato
+                {visitors.length > 0 && (
+                  <Text style={styles.sectionCount}> · {visitors.length}</Text>
+                )}
+              </Text>
+              {visitors.length === 0 ? (
+                <View style={visitorStyles.empty}>
+                  <Text style={visitorStyles.emptyText}>Nessuna visita nel periodo selezionato</Text>
+                </View>
+              ) : (
+                visitors.slice(0, 20).map((v) => {
+                  const initials = v.name.slice(0, 2).toUpperCase();
+                  const date = new Date(v.last_visit);
+                  const dateStr = `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+                  return (
+                    <View key={v.visitor_id} style={visitorStyles.row}>
+                      <View style={visitorStyles.avatar}>
+                        {v.avatar_url ? (
+                          <Image source={{ uri: v.avatar_url }} style={visitorStyles.avatarImg} />
+                        ) : (
+                          <Text style={visitorStyles.avatarInitials}>{initials}</Text>
+                        )}
+                      </View>
+                      <View style={visitorStyles.info}>
+                        <Text style={visitorStyles.name}>{v.name}</Text>
+                        <Text style={visitorStyles.date}>Ultima visita: {dateStr}</Text>
+                      </View>
+                      <View style={visitorStyles.countBadge}>
+                        <Text style={visitorStyles.countText}>{v.visit_count}x</Text>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </View>
 
             <View style={{ height: 16 }} />
@@ -997,5 +1122,80 @@ const styles = StyleSheet.create({
     color: '#a890c8',
     fontSize: 11,
     fontFamily: 'Georgia',
+  },
+  sectionCount: {
+    color: '#a890c8',
+    fontSize: 11,
+    fontWeight: '400',
+  },
+});
+
+const visitorStyles = StyleSheet.create({
+  empty: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#a890c8',
+    fontSize: 13,
+    fontFamily: 'Georgia',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(212,175,55,0.1)',
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#5a2d9a',
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  avatarInitials: {
+    color: '#D4AF37',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: 'Georgia',
+  },
+  info: {
+    flex: 1,
+    gap: 2,
+  },
+  name: {
+    color: '#F0E6FF',
+    fontSize: 14,
+    fontFamily: 'Georgia',
+  },
+  date: {
+    color: '#a890c8',
+    fontSize: 11,
+    fontFamily: 'Georgia',
+  },
+  countBadge: {
+    backgroundColor: 'rgba(90,45,154,0.6)',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.3)',
+  },
+  countText: {
+    color: '#D4AF37',
+    fontSize: 11,
+    fontFamily: 'Georgia',
+    fontWeight: '700',
   },
 });

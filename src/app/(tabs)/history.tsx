@@ -52,6 +52,7 @@ const DECK_ICON: Record<DeckType, string> = {
   celtic_cross: '✝',
   sincronia: '⚡',
   sogni: '🌙',
+  situazioni: '🌟',
 };
 
 const DECK_LABEL: Record<DeckType, string> = {
@@ -59,6 +60,7 @@ const DECK_LABEL: Record<DeckType, string> = {
   celtic_cross: 'Croce Celtica',
   sincronia: 'Sincronicità',
   sogni: 'Sogni',
+  situazioni: 'Situazioni',
 };
 
 const LIFE_AREA_LABEL: Record<LifeArea, string> = {
@@ -67,6 +69,9 @@ const LIFE_AREA_LABEL: Record<LifeArea, string> = {
   money: '💰 Finanze',
   health: '🏥 Salute',
   spiritual: '✨ Spirituale',
+  study: '🎓 Studio',
+  relations: '🤝 Relazioni',
+  generale: '🌐 Generale',
 };
 
 /* ─── CalendarPicker (identico ad analytics.tsx) ── */
@@ -397,6 +402,164 @@ const detailStyles = StyleSheet.create({
   followupBtn: { alignSelf: 'center', paddingHorizontal: 24 },
 });
 
+/* ─── Stats helpers ── */
+
+interface HistoryStats {
+  total: number;
+  topCard: string | null;
+  topCardPct: number;
+  topArea: string | null;
+  topAreaPct: number;
+  topSpread: string | null;
+  topSpreadPct: number;
+}
+
+function computeStats(readings: Reading[]): HistoryStats {
+  if (readings.length === 0) return { total: 0, topCard: null, topCardPct: 0, topArea: null, topAreaPct: 0, topSpread: null, topSpreadPct: 0 };
+
+  const n = readings.length;
+
+  // Carta più frequente (conta apparizioni su tutte le letture)
+  const cardCount: Record<string, number> = {};
+  for (const r of readings) {
+    for (const c of r.cards ?? []) {
+      cardCount[c.name_it] = (cardCount[c.name_it] ?? 0) + 1;
+    }
+  }
+  const topCardEntry = Object.entries(cardCount).sort((a, b) => b[1] - a[1])[0];
+  const topCard = topCardEntry?.[0] ?? null;
+  const topCardPct = topCard ? Math.round((topCardEntry[1] / n) * 100) : 0;
+
+  // Area di vita più selezionata
+  const areaCount: Record<string, number> = {};
+  for (const r of readings) {
+    const area = r.context?.life_area;
+    if (area) areaCount[area] = (areaCount[area] ?? 0) + 1;
+  }
+  const topAreaEntry = Object.entries(areaCount).sort((a, b) => b[1] - a[1])[0];
+  const topAreaKey = topAreaEntry?.[0] ?? null;
+  const topArea = topAreaKey ? LIFE_AREA_LABEL[topAreaKey as LifeArea] : null;
+  const topAreaPct = topAreaEntry ? Math.round((topAreaEntry[1] / n) * 100) : 0;
+
+  // Spread più usato
+  const spreadCount: Record<string, number> = {};
+  for (const r of readings) {
+    spreadCount[r.deck_type] = (spreadCount[r.deck_type] ?? 0) + 1;
+  }
+  const topSpreadEntry = Object.entries(spreadCount).sort((a, b) => b[1] - a[1])[0];
+  const topSpreadKey = topSpreadEntry?.[0] ?? null;
+  const topSpread = topSpreadKey ? DECK_LABEL[topSpreadKey as DeckType] : null;
+  const topSpreadPct = topSpreadEntry ? Math.round((topSpreadEntry[1] / n) * 100) : 0;
+
+  return { total: n, topCard, topCardPct, topArea, topAreaPct, topSpread, topSpreadPct };
+}
+
+/* ─── StatsBar component ── */
+
+function StatsBar({ stats }: { stats: HistoryStats }) {
+  if (stats.total === 0) return null;
+  return (
+    <View style={statsStyles.wrap}>
+      <View style={statsStyles.row}>
+        <View style={statsStyles.stat}>
+          <Text style={statsStyles.statValue}>{stats.total}</Text>
+          <Text style={statsStyles.statLabel}>Letture</Text>
+        </View>
+        {stats.topSpread && (
+          <View style={statsStyles.stat}>
+            <Text style={statsStyles.statValue} numberOfLines={1}>{stats.topSpread}</Text>
+            <Text style={statsStyles.statPct}>{stats.topSpreadPct}%</Text>
+            <Text style={statsStyles.statLabel}>Spread preferito</Text>
+          </View>
+        )}
+        {stats.topArea && (
+          <View style={statsStyles.stat}>
+            <Text style={statsStyles.statValue} numberOfLines={1}>{stats.topArea}</Text>
+            <Text style={statsStyles.statPct}>{stats.topAreaPct}%</Text>
+            <Text style={statsStyles.statLabel}>Area preferita</Text>
+          </View>
+        )}
+      </View>
+      {stats.topCard && (
+        <View style={statsStyles.topCardRow}>
+          <Text style={statsStyles.topCardLabel}>🃏 Carta più frequente: </Text>
+          <Text style={statsStyles.topCardName}>{stats.topCard}</Text>
+          <Text style={statsStyles.topCardPct}> {stats.topCardPct}%</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const statsStyles = StyleSheet.create({
+  wrap: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: 'rgba(36,21,80,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.25)',
+    borderRadius: 10,
+    padding: 12,
+    gap: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  stat: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 2,
+  },
+  statValue: {
+    color: '#F0D060',
+    fontFamily: 'Georgia',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  statPct: {
+    color: '#D4AF37',
+    fontFamily: 'Georgia',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  statLabel: {
+    color: '#a890c8',
+    fontFamily: 'Georgia',
+    fontSize: 9,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+  },
+  topCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(212,175,55,0.15)',
+    paddingTop: 8,
+  },
+  topCardLabel: {
+    color: '#a890c8',
+    fontFamily: 'Georgia',
+    fontSize: 11,
+  },
+  topCardName: {
+    color: '#D4AF37',
+    fontFamily: 'Georgia',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  topCardPct: {
+    color: '#F0D060',
+    fontFamily: 'Georgia',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+});
+
 /* ─── Main Screen ── */
 
 export default function HistoryScreen() {
@@ -412,6 +575,7 @@ export default function HistoryScreen() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [filterDeck, setFilterDeck] = useState<DeckType | 'all'>('all');
   const [selectedReading, setSelectedReading] = useState<Reading | null>(null);
+  const [contextSelected, setContextSelected] = useState<Set<string>>(new Set());
 
   const today = new Date().toISOString().split('T')[0];
   const monthAgo = (() => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; })();
@@ -456,6 +620,30 @@ export default function HistoryScreen() {
     });
     setDeck(reading.deck_type);
     setSelectedReading(null);
+    router.push('/(tabs)/reading' as any);
+  }
+
+  function toggleContextSelect(id: string) {
+    setContextSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleUseAsContext() {
+    const selected = readings.filter((r) => contextSelected.has(r.id));
+    const summaries = selected.map((r) =>
+      `[${DECK_LABEL[r.deck_type]} — ${formatDate(r.created_at)}]: ${r.summary || r.ai_interpretation?.slice(0, 120) || ''}`
+    );
+    const combinedContext = summaries.join('\n\n');
+    useReadingStore.getState().setContextReadings(
+      [...contextSelected],
+      summaries,
+    );
+    useReadingStore.getState().setFreeContext(combinedContext.slice(0, 500));
+    setContextSelected(new Set());
     router.push('/(tabs)/reading' as any);
   }
 
@@ -504,41 +692,71 @@ export default function HistoryScreen() {
           </ScrollView>
         </View>
 
+        {!loading && readings.length > 0 && (
+          <Text style={styles.contextHint}>Tieni premuto una lettura per selezionarla come contesto</Text>
+        )}
+        {!loading && <StatsBar stats={computeStats(readings)} />}
+
         {loading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator color="#D4AF37" size="large" />
           </View>
         ) : (
+          <>
+          {contextSelected.size > 0 && (
+            <Pressable style={styles.contextBtn} onPress={handleUseAsContext}>
+              <Text style={styles.contextBtnText}>
+                ✦ Usa {contextSelected.size} lettura{contextSelected.size > 1 ? 'e' : ''} come contesto
+              </Text>
+            </Pressable>
+          )}
+
           <FlatList
             data={readings}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <Pressable style={styles.card} onPress={() => setSelectedReading(item)}>
-                {/* Timeline dot */}
-                <View style={styles.timelineDot}>
-                  <Text style={styles.timelineIcon}>{DECK_ICON[item.deck_type]}</Text>
-                </View>
+            renderItem={({ item }) => {
+              const isCtxSelected = contextSelected.has(item.id);
+              return (
+                <Pressable
+                  style={[styles.card, isCtxSelected && styles.cardSelected]}
+                  onPress={() => setSelectedReading(item)}
+                  onLongPress={() => toggleContextSelect(item.id)}
+                >
+                  {/* Checkbox contesto */}
+                  <Pressable
+                    style={[styles.contextCheck, isCtxSelected && styles.contextCheckActive]}
+                    onPress={() => toggleContextSelect(item.id)}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.contextCheckText}>{isCtxSelected ? '✓' : ''}</Text>
+                  </Pressable>
 
-                <View style={styles.cardContent}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.cardDeckLabel}>{DECK_LABEL[item.deck_type]}</Text>
-                    <Text style={styles.cardDate}>{formatDate(item.created_at)}</Text>
+                  {/* Timeline dot */}
+                  <View style={styles.timelineDot}>
+                    <Text style={styles.timelineIcon}>{DECK_ICON[item.deck_type]}</Text>
                   </View>
 
-                  {item.context && (
-                    <Text style={styles.cardArea}>{LIFE_AREA_LABEL[item.context.life_area]}</Text>
-                  )}
+                  <View style={styles.cardContent}>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.cardDeckLabel}>{DECK_LABEL[item.deck_type]}</Text>
+                      <Text style={styles.cardDate}>{formatDate(item.created_at)}</Text>
+                    </View>
 
-                  <Text style={styles.cardSummary} numberOfLines={2}>{item.summary || item.ai_interpretation}</Text>
+                    {item.context && (
+                      <Text style={styles.cardArea}>{LIFE_AREA_LABEL[item.context.life_area]}</Text>
+                    )}
 
-                  <View style={styles.cardFooter}>
-                    <Text style={styles.cardCards}>
-                      {(item.cards ?? []).length} carte · {(item.followups ?? []).length} domande
-                    </Text>
+                    <Text style={styles.cardSummary} numberOfLines={2}>{item.summary || item.ai_interpretation}</Text>
+
+                    <View style={styles.cardFooter}>
+                      <Text style={styles.cardCards}>
+                        {(item.cards ?? []).length} carte · {(item.followups ?? []).length} domande
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              </Pressable>
-            )}
+                </Pressable>
+              );
+            }}
             contentContainerStyle={styles.list}
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
@@ -551,6 +769,7 @@ export default function HistoryScreen() {
               </View>
             }
           />
+          </>
         )}
 
         <TabBar active="history" onChange={handleNav} />
@@ -585,6 +804,23 @@ const styles = StyleSheet.create({
   deckChipText: { color: '#a890c8', fontFamily: 'Georgia', fontSize: 11 },
   deckChipTextActive: { color: '#D4AF37', fontWeight: '700' },
   list: { padding: 16, gap: 12, paddingBottom: 16 },
+  contextBtn: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#5a2d9a',
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  contextBtnText: {
+    color: '#F0D060',
+    fontFamily: 'Georgia',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
   card: {
     flexDirection: 'row',
     gap: 12,
@@ -593,6 +829,32 @@ const styles = StyleSheet.create({
     borderColor: '#8B7020',
     borderRadius: 10,
     padding: 14,
+  },
+  cardSelected: {
+    borderColor: '#D4AF37',
+    backgroundColor: 'rgba(90,45,154,0.4)',
+  },
+  contextCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: '#8B7020',
+    backgroundColor: 'rgba(20,13,46,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    flexShrink: 0,
+  },
+  contextCheckActive: {
+    backgroundColor: '#D4AF37',
+    borderColor: '#F0D060',
+  },
+  contextCheckText: {
+    color: '#140d2e',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 14,
   },
   timelineDot: {
     width: 42,
@@ -619,4 +881,13 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 40 },
   emptyText: { color: '#a890c8', fontFamily: 'Georgia', fontSize: 14, textAlign: 'center' },
   emptyAction: { color: '#D4AF37', fontFamily: 'Georgia', fontSize: 13 },
+  contextHint: {
+    color: '#5a4a70',
+    fontFamily: 'Georgia',
+    fontSize: 10,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginBottom: 4,
+    marginHorizontal: 16,
+  },
 });

@@ -4,7 +4,6 @@ let bgSound: Audio.Sound | null = null;
 let ttsSound: Audio.Sound | null = null;
 let bgEnabled = true;
 let ttsEnabled = true;
-let lastSpokenText = '';
 
 export async function initAudio() {
   await Audio.setAudioModeAsync({
@@ -132,14 +131,6 @@ export async function stopTts() {
     }
   } catch {}
   ttsSound = null;
-}
-
-export function setLastSpokenText(text: string) {
-  lastSpokenText = text;
-}
-
-export function getLastSpokenText() {
-  return lastSpokenText;
 }
 
 export async function cleanupAudio() {
