@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useAuthStore } from '@/lib/auth-store';
 import { supabase } from '@/lib/supabase';
+import { registerForPushNotifications, savePushToken, scheduleDailyCardNotification } from '@/lib/push-notifications';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -78,6 +79,18 @@ export default function RootLayout() {
     });
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  // Registra push token e schedula daily card notification all'avvio
+  useEffect(() => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return;
+    registerForPushNotifications()
+      .then((token) => {
+        if (token) savePushToken(userId, token).catch(() => {});
+        scheduleDailyCardNotification().catch(() => {});
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {

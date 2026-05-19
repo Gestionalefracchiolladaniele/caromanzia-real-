@@ -20,6 +20,7 @@ import { TabBar, type TabId } from '@/components/ui/TabBar';
 import { TitleBox } from '@/components/ui/TitleBox';
 import { useAuthStore, useIsCartomante, useSubscription } from '@/lib/auth-store';
 import { getOfferings, purchasePackage, restorePurchases, type RCOffering } from '@/lib/revenuecat';
+import { scheduleDailyCardNotification, cancelDailyCardNotification } from '@/lib/push-notifications';
 import { supabase } from '@/lib/supabase';
 import type { SubscriptionStatus } from '@/types';
 
@@ -528,6 +529,17 @@ export default function SettingsScreen() {
     router.push(`/(tabs)/${id}` as any);
   };
 
+  const handleToggleNotifications = async (val: boolean) => {
+    setNotificationsEnabled(val);
+    try {
+      if (val) {
+        await scheduleDailyCardNotification();
+      } else {
+        await cancelDailyCardNotification();
+      }
+    } catch {}
+  };
+
   const handleSaveSettings = async () => {
     setSavingSettings(true);
     try {
@@ -582,18 +594,18 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          {/* Notifiche */}
+          {/* Notifiche — include daily card + ping */}
           <View style={styles.row}>
             <View style={styles.rowIcon}>
               <Text style={styles.rowEmoji}>🔔</Text>
             </View>
             <View style={styles.rowInfo}>
               <Text style={styles.rowTitle}>Notifiche</Text>
-              <Text style={styles.rowSub}>Ping e aggiornamenti</Text>
+              <Text style={styles.rowSub}>Carta del giorno (8:00) · Ping e aggiornamenti</Text>
             </View>
             <Switch
               value={notificationsEnabled}
-              onValueChange={setNotificationsEnabled}
+              onValueChange={handleToggleNotifications}
               trackColor={{ false: 'rgba(90,45,154,0.4)', true: 'rgba(212,175,55,0.6)' }}
               thumbColor={notificationsEnabled ? '#D4AF37' : '#5a2d9a'}
             />

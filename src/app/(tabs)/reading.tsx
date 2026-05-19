@@ -1040,35 +1040,56 @@ export default function ReadingScreen() {
   const hideTabBar = ['shuffling', 'revealing', 'interpreting', 'followup',
     'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase);
 
-  // Celtic Cross ha il suo layout — struttura uguale alle altre letture (revealZone + chatZone)
+  // Celtic Cross — stesso wrapper delle altre letture, croce geometrica nella revealZone
   if (deckType === 'celtic_cross' && ['revealing', 'interpreting', 'followup',
     'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase)) {
+    const celticMascotMsg = READING_MASCOT_MESSAGES[phase];
+    const showCelticMascot = celticMascotMsg && (phase === 'revealing' || phase.startsWith('celtic_phase'));
 
     return (
       <>
       <View style={styles.screen}>
         <ElaborateFrame />
         <View style={styles.inner}>
-          {/* revealZone: tutta l'altezza disponibile tranne userBar+audioBar */}
-          <View style={[styles.revealZone, phase !== 'followup' && { flex: 1 }]}>
-            <View style={styles.revealHeader}>
-              <Pressable onPress={handleRequestReset} style={styles.resetBtn}>
-                <Text style={styles.resetBtnText}>✕ Nuova lettura</Text>
+          {/* Header: reset + salva */}
+          <View style={styles.revealHeader}>
+            <Pressable onPress={handleRequestReset} style={styles.resetBtn}>
+              <Text style={styles.resetBtnText}>✕ Nuova lettura</Text>
+            </Pressable>
+            {phase === 'followup' && (
+              <Pressable onPress={() => setPhase('saving')} style={styles.saveShortcutBtn}>
+                <Text style={styles.saveShortcutText}>Salva →</Text>
               </Pressable>
-              {phase === 'followup' && (
-                <Pressable onPress={() => setPhase('saving')} style={styles.saveShortcutBtn}>
-                  <Text style={styles.saveShortcutText}>Salva →</Text>
-                </Pressable>
-              )}
-            </View>
+            )}
+          </View>
 
-            {phase !== 'followup' && (
+          {/* DivineMascot — stesso pattern altre letture */}
+          {showCelticMascot && (
+            <View style={styles.mascotContainer}>
+              <DivineMascot message={celticMascotMsg!} width={260} />
+            </View>
+          )}
+
+          {/* Zona carte / chat — flex 1 */}
+          <View style={styles.celticRevealZone}>
+            {phase === 'followup' ? (
+              <FollowupPanel
+                aiText={aiText}
+                isStreaming={isStreaming}
+                followups={followups}
+                onAskFollowup={handleFollowup}
+                maxFollowups={maxFollowups}
+                ttsOn={ttsOn}
+                isPlaying={isPlaying}
+                onPlayTts={handlePlayTts}
+                onPauseTts={handlePauseTts}
+              />
+            ) : (
               <CelticCrossLayout
                 cards={cards}
                 celticPhase={celticPhase}
                 celticPhaseTexts={celticPhaseTexts}
                 isStreaming={isStreaming}
-                mascotMessage={READING_MASCOT_MESSAGES[phase] ?? undefined}
                 onRevealPhase={handleCelticRevealPhase}
                 onAskPhaseQuestion={handleCelticPhaseQuestion}
                 onProceedToFollowup={() => {
@@ -1080,7 +1101,7 @@ export default function ReadingScreen() {
             )}
           </View>
 
-          {/* User bar — uguale alle altre letture */}
+          {/* User bar — identica alle altre letture */}
           <View style={styles.readingUserBar}>
             {userAvatar ? (
               <Image source={{ uri: userAvatar }} style={styles.readingUserAvatar} />
@@ -1097,7 +1118,7 @@ export default function ReadingScreen() {
             </View>
           </View>
 
-          {/* Audio controls */}
+          {/* Audio bar — identica alle altre letture */}
           <View style={styles.audioBar}>
             <Pressable onPress={handleToggleMusic} style={[styles.audioBtn, !musicOn && styles.audioBtnOff]}>
               <Svg width="16" height="16" viewBox="0 0 24 24" fill={musicOn ? '#D4AF37' : '#5a4a30'}>
@@ -1116,23 +1137,6 @@ export default function ReadingScreen() {
               </Text>
             </Pressable>
           </View>
-
-          {/* chatZone: solo nel followup */}
-          {phase === 'followup' && (
-            <View style={styles.chatZone}>
-              <FollowupPanel
-                aiText={aiText}
-                isStreaming={isStreaming}
-                followups={followups}
-                onAskFollowup={handleFollowup}
-                maxFollowups={maxFollowups}
-                ttsOn={ttsOn}
-                isPlaying={isPlaying}
-                onPlayTts={handlePlayTts}
-                onPauseTts={handlePauseTts}
-              />
-            </View>
-          )}
         </View>
       </View>
       <ResetConfirmModal />
@@ -1506,6 +1510,10 @@ const styles = StyleSheet.create({
   celticMascotWrap: {
     alignItems: 'center',
     paddingVertical: 4,
+  },
+  celticRevealZone: {
+    flex: 1,
+    minHeight: 0,
   },
   revealZone: {
     flex: 5,

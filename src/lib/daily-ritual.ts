@@ -1,3 +1,4 @@
+import * as Notifications from 'expo-notifications';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 import { ALL_CARDS } from '@/features/reading/tarot-cards';
@@ -91,6 +92,17 @@ async function createTodayDailyCard(userId: string): Promise<DailyCard> {
     type: 'daily_card',
     card_id: card.number,
     note: shortMsg,
+  }).catch(() => {});
+
+  // Push notification immediata con carta e messaggio
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: `🔮 ${card.name_it}`,
+      body: shortMsg,
+      data: { type: 'daily_card', card_id: card.number },
+      sound: true,
+    },
+    trigger: null, // immediata
   }).catch(() => {});
 
   return {

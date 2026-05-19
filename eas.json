@@ -43,6 +43,7 @@
         "image": "latest"
       },
       "android": {
+        "buildType": "apk",
         "image": "latest"
       },
       "env": {
