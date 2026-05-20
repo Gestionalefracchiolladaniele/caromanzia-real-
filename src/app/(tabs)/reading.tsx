@@ -30,6 +30,7 @@ import { saveReading, fetchPriorReadings } from '@/lib/supabase-readings';
 import {
   initAudio, playBackground, fadeOutBackground,
   stopTts, pauseTts, resumeTts, setBgEnabled, setTtsEnabled, isBgEnabled, isTtsEnabled,
+  setLastSpokenText, getLastSpokenText,
 } from '@/lib/audio-manager';
 import { speakText } from '@/lib/google-tts';
 import type { DeckType, EmotionalState, LifeArea, Urgency } from '@/types';
@@ -77,6 +78,14 @@ const SPREADS: SpreadMode[] = [
   { id: 'sogni', icon: '🌙', name: 'SOGNI', sub: 'Interpretazione Onirica', focus: 'Simboli del sogno + AI', time: '~5 min', free: true },
   { id: 'situazioni', icon: '🌟', name: 'SITUAZIONI', sub: 'Analisi Dinamiche', focus: 'Forze in gioco + risoluzioni', time: '~5 min', free: true },
 ];
+
+function getSpreadName(deckType?: DeckType | null): string {
+  return SPREADS.find((s) => s.id === deckType)?.name || 'Lettura';
+}
+
+function getSpreadSub(deckType?: DeckType | null): string {
+  return SPREADS.find((s) => s.id === deckType)?.sub || 'Lettura personale';
+}
 
 export default function ReadingScreen() {
   const phase = useReadingStore((s) => s.phase);
@@ -235,10 +244,16 @@ export default function ReadingScreen() {
   }, [phase]);
 
   // Parla il testo AI appena isStreaming finisce nella fase interpreting — solo se ttsOn
+  // Smart logic: traccia quale testo è stato già letto per evitare reletture
   useEffect(() => {
     if (isStreaming || !ttsOn || !aiText) return;
     if (phase !== 'interpreting' && !['celtic_phase1','celtic_phase2','celtic_phase3','celtic_phase4'].includes(phase)) return;
+
+    const lastSpoken = getLastSpokenText();
+    if (aiText === lastSpoken) return; // Testo già letto, non rileggere
+
     setIsPlaying(true);
+    setLastSpokenText(aiText);
     ttsAbortRef.current?.abort();
     ttsAbortRef.current = new AbortController();
     speakText(aiText, ttsAbortRef.current.signal)
@@ -333,6 +348,20 @@ export default function ReadingScreen() {
           const updated = [...state.followups];
           updated[updated.length - 1] = { question, answer };
           useReadingStore.setState({ followups: updated });
+
+          // Auto-TTS per risposta NUOVA se ttsOn
+          if (ttsOn && answer.length > 0) {
+            const lastSpoken = getLastSpokenText();
+            if (answer !== lastSpoken) {
+              setIsPlaying(true);
+              setLastSpokenText(answer);
+              ttsAbortRef.current?.abort();
+              ttsAbortRef.current = new AbortController();
+              speakText(answer, ttsAbortRef.current.signal)
+                .catch(() => {})
+                .finally(() => setIsPlaying(false));
+            }
+          }
         },
         abortRef.current.signal,
       );
@@ -515,15 +544,19 @@ export default function ReadingScreen() {
     if (isPlaying) {
       pauseTts().catch(() => {});
       setIsPlaying(false);
+      return;
+    }
+    setIsPlaying(true);
+    // Se il testo è già stato caricato in audio, riprendi. Altrimenti parti da zero.
+    if (getLastSpokenText() === aiText) {
+      resumeTts().catch(() => setIsPlaying(false));
     } else {
-      setIsPlaying(true);
       ttsAbortRef.current?.abort();
       ttsAbortRef.current = new AbortController();
-      resumeTts().catch(() => {
-        speakText(aiText, ttsAbortRef.current!.signal)
-          .catch(() => {})
-          .finally(() => setIsPlaying(false));
-      });
+      setLastSpokenText(aiText);
+      speakText(aiText, ttsAbortRef.current.signal)
+        .catch(() => {})
+        .finally(() => setIsPlaying(false));
     }
   }
 
@@ -1040,56 +1073,36 @@ export default function ReadingScreen() {
   const hideTabBar = ['shuffling', 'revealing', 'interpreting', 'followup',
     'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase);
 
-  // Celtic Cross — stesso wrapper delle altre letture, croce geometrica nella revealZone
+  // Celtic Cross ha il suo layout — struttura uguale alle altre letture (revealZone + chatZone)
   if (deckType === 'celtic_cross' && ['revealing', 'interpreting', 'followup',
     'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase)) {
-    const celticMascotMsg = READING_MASCOT_MESSAGES[phase];
-    const showCelticMascot = celticMascotMsg && (phase === 'revealing' || phase.startsWith('celtic_phase'));
 
     return (
       <>
       <View style={styles.screen}>
         <ElaborateFrame />
         <View style={styles.inner}>
-          {/* Header: reset + salva */}
-          <View style={styles.revealHeader}>
-            <Pressable onPress={handleRequestReset} style={styles.resetBtn}>
-              <Text style={styles.resetBtnText}>✕ Nuova lettura</Text>
-            </Pressable>
-            {phase === 'followup' && (
-              <Pressable onPress={() => setPhase('saving')} style={styles.saveShortcutBtn}>
-                <Text style={styles.saveShortcutText}>Salva →</Text>
+          {/* revealZone: tutta l'altezza disponibile tranne userBar+audioBar */}
+          <View style={[styles.revealZone, phase !== 'followup' && { flex: 1 }]}>
+            <View style={styles.revealHeader}>
+              <Pressable onPress={handleRequestReset} style={styles.resetBtn}>
+                <Text style={styles.resetBtnText}>✕ Nuova lettura</Text>
               </Pressable>
-            )}
-          </View>
-
-          {/* DivineMascot — stesso pattern altre letture */}
-          {showCelticMascot && (
-            <View style={styles.mascotContainer}>
-              <DivineMascot message={celticMascotMsg!} width={260} />
+              {phase === 'followup' && (
+                <Pressable onPress={() => setPhase('saving')} style={styles.saveShortcutBtn}>
+                  <Text style={styles.saveShortcutText}>Salva →</Text>
+                </Pressable>
+              )}
             </View>
-          )}
 
-          {/* Zona carte / chat — flex 1 */}
-          <View style={styles.celticRevealZone}>
-            {phase === 'followup' ? (
-              <FollowupPanel
-                aiText={aiText}
-                isStreaming={isStreaming}
-                followups={followups}
-                onAskFollowup={handleFollowup}
-                maxFollowups={maxFollowups}
-                ttsOn={ttsOn}
-                isPlaying={isPlaying}
-                onPlayTts={handlePlayTts}
-                onPauseTts={handlePauseTts}
-              />
-            ) : (
+            {phase !== 'followup' && (
               <CelticCrossLayout
                 cards={cards}
                 celticPhase={celticPhase}
                 celticPhaseTexts={celticPhaseTexts}
                 isStreaming={isStreaming}
+                mascotMessage={READING_MASCOT_MESSAGES[phase] ?? undefined}
+                spreadName={getSpreadName(deckType)}
                 onRevealPhase={handleCelticRevealPhase}
                 onAskPhaseQuestion={handleCelticPhaseQuestion}
                 onProceedToFollowup={() => {
@@ -1101,42 +1114,27 @@ export default function ReadingScreen() {
             )}
           </View>
 
-          {/* User bar — identica alle altre letture */}
-          <View style={styles.readingUserBar}>
-            {userAvatar ? (
-              <Image source={{ uri: userAvatar }} style={styles.readingUserAvatar} />
-            ) : (
-              <View style={styles.readingUserAvatarPlaceholder}>
-                <Text style={styles.readingUserAvatarInitial}>
-                  {(userName ?? 'U').slice(0, 1).toUpperCase()}
-                </Text>
-              </View>
-            )}
-            <View style={styles.readingUserInfo}>
-              <Text style={styles.readingUserName}>{userName ?? 'Tu'}</Text>
-              <Text style={styles.readingUserSub}>Lettura personale · Croce Celtica</Text>
+          {/* chatZone: solo nel followup — header integrato dentro la chat */}
+          {phase === 'followup' && (
+            <View style={styles.chatZone}>
+              <FollowupPanel
+                aiText={aiText}
+                isStreaming={isStreaming}
+                followups={followups}
+                onAskFollowup={handleFollowup}
+                maxFollowups={maxFollowups}
+                userName={userName ?? 'Tu'}
+                userAvatar={userAvatar}
+                spreadName={getSpreadName(deckType)}
+                musicOn={musicOn}
+                ttsOn={ttsOn}
+                isPlaying={isPlaying}
+                onToggleMusic={handleToggleMusic}
+                onToggleTts={handleToggleTts}
+                onPlayTts={handlePlayTts}
+              />
             </View>
-          </View>
-
-          {/* Audio bar — identica alle altre letture */}
-          <View style={styles.audioBar}>
-            <Pressable onPress={handleToggleMusic} style={[styles.audioBtn, !musicOn && styles.audioBtnOff]}>
-              <Svg width="16" height="16" viewBox="0 0 24 24" fill={musicOn ? '#D4AF37' : '#5a4a30'}>
-                <Path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z" />
-              </Svg>
-              <Text style={[styles.audioBtnText, !musicOn && styles.audioBtnTextOff]}>
-                {musicOn ? 'Musica' : 'Musica off'}
-              </Text>
-            </Pressable>
-            <Pressable onPress={handleToggleTts} style={[styles.audioBtn, !ttsOn && styles.audioBtnOff]}>
-              <Svg width="16" height="16" viewBox="0 0 24 24" fill={ttsOn ? '#D4AF37' : '#5a4a30'}>
-                <Path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z" />
-              </Svg>
-              <Text style={[styles.audioBtnText, !ttsOn && styles.audioBtnTextOff]}>
-                {ttsOn ? 'Voce' : 'Voce off'}
-              </Text>
-            </Pressable>
-          </View>
+          )}
         </View>
       </View>
       <ResetConfirmModal />
@@ -1166,10 +1164,10 @@ export default function ReadingScreen() {
             )}
           </View>
 
-          {/* DivineMascot overlay — non assoluto, sopra le carte */}
+          {/* DivineMascot overlay assoluto — non occupa spazio, le carte sono visibili sotto */}
           {showMascot && mascotMsg && (
-            <View style={styles.mascotContainer}>
-              <DivineMascot message={mascotMsg} width={280} />
+            <View style={styles.mascotContainer} pointerEvents="none">
+              <DivineMascot message={mascotMsg} width={200} />
             </View>
           )}
 
@@ -1191,23 +1189,6 @@ export default function ReadingScreen() {
           </Pressable>
         </View>
 
-        {/* Avatar + Name lettura personale */}
-        <View style={styles.readingUserBar}>
-          {userAvatar ? (
-            <Image source={{ uri: userAvatar }} style={styles.readingUserAvatar} />
-          ) : (
-            <View style={styles.readingUserAvatarPlaceholder}>
-              <Text style={styles.readingUserAvatarInitial}>
-                {(userName ?? 'U').slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <View style={styles.readingUserInfo}>
-            <Text style={styles.readingUserName}>{userName ?? 'Lettore'}</Text>
-            <Text style={styles.readingUserSub}>Lettura personale</Text>
-          </View>
-        </View>
-
         <View style={styles.chatZone}>
           {(phase === 'interpreting' || phase === 'followup') && (
             <FollowupPanel
@@ -1216,10 +1197,15 @@ export default function ReadingScreen() {
               followups={followups}
               onAskFollowup={handleFollowup}
               maxFollowups={maxFollowups}
+              userName={userName ?? 'Lettore'}
+              userAvatar={userAvatar}
+              spreadName={getSpreadName(deckType)}
+              musicOn={musicOn}
               ttsOn={ttsOn}
               isPlaying={isPlaying}
+              onToggleMusic={handleToggleMusic}
+              onToggleTts={handleToggleTts}
               onPlayTts={handlePlayTts}
-              onPauseTts={handlePauseTts}
             />
           )}
           {phase === 'revealing' && revealedCount < cards.length && (
@@ -1230,29 +1216,6 @@ export default function ReadingScreen() {
             </View>
           )}
         </View>
-
-        {/* Audio controls — visibili durante lettura attiva */}
-        {['interpreting', 'followup', 'revealing',
-          'celtic_phase1', 'celtic_phase2', 'celtic_phase3', 'celtic_phase4'].includes(phase) && (
-          <View style={styles.audioBar}>
-            <Pressable onPress={handleToggleMusic} style={[styles.audioBtn, !musicOn && styles.audioBtnOff]}>
-              <Svg width="16" height="16" viewBox="0 0 24 24" fill={musicOn ? '#D4AF37' : '#5a4a30'}>
-                <Path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z" />
-              </Svg>
-              <Text style={[styles.audioBtnText, !musicOn && styles.audioBtnTextOff]}>
-                {musicOn ? 'Musica' : 'Musica off'}
-              </Text>
-            </Pressable>
-            <Pressable onPress={handleToggleTts} style={[styles.audioBtn, !ttsOn && styles.audioBtnOff]}>
-              <Svg width="16" height="16" viewBox="0 0 24 24" fill={ttsOn ? '#D4AF37' : '#5a4a30'}>
-                <Path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z" />
-              </Svg>
-              <Text style={[styles.audioBtnText, !ttsOn && styles.audioBtnTextOff]}>
-                {ttsOn ? 'Voce' : 'Voce off'}
-              </Text>
-            </Pressable>
-          </View>
-        )}
 
         {!hideTabBar && <TabBar active="reading" onChange={handleNav} />}
       </View>
@@ -1502,18 +1465,18 @@ const styles = StyleSheet.create({
     borderColor: '#F0D060',
   },
   mascotContainer: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    zIndex: 20,
     pointerEvents: 'none',
   },
   celticMascotWrap: {
     alignItems: 'center',
     paddingVertical: 4,
-  },
-  celticRevealZone: {
-    flex: 1,
-    minHeight: 0,
   },
   revealZone: {
     flex: 5,
@@ -1524,9 +1487,10 @@ const styles = StyleSheet.create({
   },
   cardRevealPressable: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-    minHeight: 200,
+    paddingBottom: 12,
+    minHeight: 140,
   },
   revealHeader: {
     flexDirection: 'row',
@@ -1544,6 +1508,8 @@ const styles = StyleSheet.create({
   chatZone: {
     flex: 4,
     minHeight: 160,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
   },
   readingUserBar: {
     flexDirection: 'row',
@@ -1803,6 +1769,81 @@ const styles = StyleSheet.create({
   },
   audioBtnTextOff: {
     color: '#5a4a30',
+  },
+  unifiedBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 10,
+    backgroundColor: 'rgba(20,13,46,0.85)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(212,175,55,0.25)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(212,175,55,0.15)',
+  },
+  unifiedAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+  },
+  unifiedAvatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#5a2d9a',
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unifiedAvatarInitial: {
+    color: '#D4AF37',
+    fontSize: 15,
+    fontFamily: 'Georgia',
+    fontWeight: '700',
+  },
+  unifiedUserInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  unifiedUserName: {
+    color: '#F0D060',
+    fontSize: 13,
+    fontFamily: 'Georgia',
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  unifiedUserSub: {
+    color: '#a890c8',
+    fontSize: 10,
+    fontFamily: 'Georgia',
+    letterSpacing: 0.3,
+  },
+  unifiedActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  unifiedIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(90,45,154,0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unifiedIconBtnOff: {
+    backgroundColor: 'rgba(36,21,80,0.4)',
+    borderColor: 'rgba(90,74,48,0.3)',
+  },
+  unifiedIconBtnEmoji: {
+    color: '#D4AF37',
+    fontSize: 13,
   },
   resumeBanner: {
     backgroundColor: 'rgba(90,45,154,0.4)',

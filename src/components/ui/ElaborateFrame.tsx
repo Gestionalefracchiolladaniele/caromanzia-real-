@@ -1,5 +1,6 @@
 import React from 'react';
 import { useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, {
   Circle,
   Defs,
@@ -18,7 +19,15 @@ import Svg, {
 } from 'react-native-svg';
 
 export function ElaborateFrame() {
-  const { width, height } = useWindowDimensions();
+  const { width: rawWidth, height: rawHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  // Subtract safe-area insets so the frame fits inside the visible area
+  // (avoids gems/lines being clipped by notch or Android gesture bar)
+  const width = rawWidth - insets.left - insets.right;
+  const height = rawHeight - insets.top - insets.bottom;
+  const offsetX = insets.left;
+  const offsetY = insets.top;
 
   // Design was made for 390×844 — scale everything proportionally
   const scaleX = width / 390;
@@ -51,7 +60,7 @@ export function ElaborateFrame() {
 
   return (
     <Svg
-      style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 1 }}
+      style={{ position: 'absolute', top: offsetY, left: offsetX, pointerEvents: 'none', zIndex: 1 }}
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}

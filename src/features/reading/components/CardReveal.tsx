@@ -14,13 +14,13 @@ import type { DeckType, TarotCard } from '@/types';
 import cardsIT from '@/data/tarot-cards-it.json';
 
 function getCardDimensions(total: number, deckType?: DeckType): { w: number; h: number } {
-  if (deckType === 'sogni') return { w: 100, h: 166 };
-  if (deckType === 'sincronia') return { w: 130, h: 216 };
-  if (deckType === 'tre_carte') return { w: 96, h: 160 };
-  if (total === 1) return { w: 120, h: 200 };
-  if (total <= 3) return { w: 96, h: 160 };
-  if (total <= 5) return { w: 80, h: 133 };
-  return { w: 66, h: 110 };
+  if (deckType === 'sogni') return { w: 72, h: 120 };
+  if (deckType === 'sincronia') return { w: 90, h: 150 };
+  if (deckType === 'tre_carte') return { w: 70, h: 117 };
+  if (total === 1) return { w: 90, h: 150 };
+  if (total <= 3) return { w: 70, h: 117 };
+  if (total <= 5) return { w: 60, h: 100 };
+  return { w: 50, h: 83 };
 }
 
 interface CardItemProps {
@@ -73,7 +73,7 @@ function TarotCardItem({ card, index, total, deckType, revealed, onPress }: Card
   });
 
   const borderColor = card.reversed ? '#C0392B' : '#D4AF37';
-  const backOpacity = flipAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0, 0] });
+  const backOpacity = flipAnim.interpolate({ inputRange: [0, 0.45, 1], outputRange: [1, 1, 0] });
 
   return (
     <Pressable onPress={onPress} style={{ width: w, height: h, overflow: 'hidden' }}>
@@ -81,15 +81,11 @@ function TarotCardItem({ card, index, total, deckType, revealed, onPress }: Card
       <Animated.View
         style={[
           styles.cardFace,
-          { width: w, height: h, opacity: backOpacity },
+          StyleSheet.absoluteFillObject,
+          { opacity: backOpacity },
         ]}
       >
-        <View
-          style={[
-            styles.cardBack,
-            { width: w, height: h },
-          ]}
-        >
+        <View style={[styles.cardBack, { width: w, height: h }]}>
           <Text style={styles.cardBackSymbol}>✦</Text>
         </View>
       </Animated.View>
@@ -318,10 +314,10 @@ export function CardReveal({ cards, revealedCount, positions, deckType }: CardRe
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    width: '100%',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
+    justifyContent: 'flex-end',
+    paddingVertical: 4,
   },
   cardsRow: {
     gap: 8,
@@ -339,6 +335,22 @@ const styles = StyleSheet.create({
   cardWrapper: {
     alignItems: 'center',
     gap: 4,
+  },
+  cardFace: {
+    borderRadius: 6,
+  },
+  cardBack: {
+    backgroundColor: '#2a1060',
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBackSymbol: {
+    color: '#D4AF37',
+    fontSize: 18,
+    opacity: 0.8,
   },
   cardInner: {
     overflow: 'hidden',

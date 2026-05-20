@@ -5,7 +5,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { useRole } from '@/features/role-provider/RoleProvider';
 
-export type TabId = 'home' | 'reading' | 'readings' | 'history' | 'impostazioni' | 'settings' | 'analytics' | 'cards';
+export type TabId = 'home' | 'reading' | 'history' | 'impostazioni' | 'analytics' | 'cards';
 
 const ICON_PATHS: Record<string, string> = {
   home:        'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',

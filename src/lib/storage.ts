@@ -1,23 +1,42 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-function makeStorage() {
+const cache = new Map<string, string>();
+let initialized = false;
+
+const KEYS = ['cartomanzia.lang', 'reading_in_progress'];
+
+async function initCache(): Promise<void> {
+  if (initialized) return;
   if (Platform.OS === 'web') {
-    return {
-      getString: (key: string): string | undefined => localStorage.getItem(key) ?? undefined,
-      set: (key: string, value: string): void => localStorage.setItem(key, value),
-      delete: (key: string): void => localStorage.removeItem(key),
-      contains: (key: string): boolean => localStorage.getItem(key) !== null,
-    };
+    for (const k of KEYS) {
+      const v = localStorage.getItem(k);
+      if (v !== null) cache.set(k, v);
+    }
+  } else {
+    for (const k of KEYS) {
+      const v = await AsyncStorage.getItem(k);
+      if (v !== null) cache.set(k, v);
+    }
   }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { MMKV } = require('react-native-mmkv');
-  const mmkv = new MMKV({ id: 'cartomanzia' });
-  return {
-    getString: (key: string): string | undefined => mmkv.getString(key),
-    set: (key: string, value: string): void => mmkv.set(key, value),
-    delete: (key: string): void => mmkv.delete(key),
-    contains: (key: string): boolean => mmkv.contains(key),
-  };
+  initialized = true;
 }
 
-export const Storage = makeStorage();
+void initCache();
+
+export const Storage = {
+  getString: (key: string): string | undefined => cache.get(key),
+  set: (key: string, value: string): void => {
+    cache.set(key, value);
+    if (Platform.OS === 'web') localStorage.setItem(key, value);
+    else void AsyncStorage.setItem(key, value);
+  },
+  delete: (key: string): void => {
+    cache.delete(key);
+    if (Platform.OS === 'web') localStorage.removeItem(key);
+    else void AsyncStorage.removeItem(key);
+  },
+  contains: (key: string): boolean => cache.has(key),
+};
+
+export { initCache };

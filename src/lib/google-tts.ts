@@ -60,7 +60,7 @@ function toSsml(text: string): string {
 
 export async function speakText(text: string, signal?: AbortSignal): Promise<void> {
   const chunks = splitText(text.trim());
-  const apiKey = 'AIzaSyBvR8ShUKoSd8RfIjMCbdMmbiozCzLdmTE';
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_TTS_API_KEY || 'AIzaSyBvR8ShUKoSd8RfIjMCbdMmbiozCzLdmTE';
 
   for (const chunk of chunks) {
     if (signal?.aborted) return;
@@ -89,14 +89,22 @@ export async function speakText(text: string, signal?: AbortSignal): Promise<voi
         }
       );
 
-      if (!response.ok) continue;
+      if (!response.ok) {
+        console.error('[TTS] API error:', response.status, response.statusText);
+        continue;
+      }
       const data = await response.json();
-      if (!data?.audioContent) continue;
+      if (!data?.audioContent) {
+        console.error('[TTS] No audio content in response');
+        continue;
+      }
 
       if (signal?.aborted) return;
       await playTtsAudio(data.audioContent);
       const estimatedDurationMs = (chunk.length / 15) * 1000;
       await new Promise((r) => setTimeout(r, estimatedDurationMs));
-    } catch {}
+    } catch (err) {
+      console.error('[TTS] Error:', err);
+    }
   }
 }

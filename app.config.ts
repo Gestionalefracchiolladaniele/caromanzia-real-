@@ -8,8 +8,8 @@ import 'tsx/cjs';
 // eslint-disable-next-line perfectionist/sort-imports
 import Env from './env';
 
-const EXPO_ACCOUNT_OWNER = 'cartomanzia';
-const EAS_PROJECT_ID = '';
+const EXPO_ACCOUNT_OWNER = 'praticantisokagakkai';
+const EAS_PROJECT_ID = 'c3a711e8-1d8a-496d-9db3-4a2139c6c322';
 
 const appIconBadgeConfig: AppIconBadgeConfig = {
   enabled: Env.EXPO_PUBLIC_APP_ENV !== 'production',
@@ -69,7 +69,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-splash-screen',
       {
         backgroundColor: '#1A1A2E',
-        image: './assets/splash-icon.png',
+        image: './assets/splash.png',
         imageWidth: 150,
       },
     ],

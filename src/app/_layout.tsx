@@ -3,10 +3,12 @@ import '../global.css';
 import * as SplashScreen from 'expo-splash-screen';
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useAuthStore } from '@/lib/auth-store';
+import { initCache } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { registerForPushNotifications, savePushToken, scheduleDailyCardNotification } from '@/lib/push-notifications';
 
@@ -18,8 +20,14 @@ export default function RootLayout() {
   const setLoading = useAuthStore((s) => s.setLoading);
   const isLoading = useAuthStore((s) => s.isLoading);
   const didInit = useRef(false);
+  const [cacheReady, setCacheReady] = useState(false);
 
   useEffect(() => {
+    void initCache().then(() => setCacheReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!cacheReady) return;
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'INITIAL_SESSION' && didInit.current) return;
       if (event === 'INITIAL_SESSION') didInit.current = true;
@@ -79,7 +87,7 @@ export default function RootLayout() {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [cacheReady]);
 
   // Registra push token e schedula daily card notification all'avvio
   useEffect(() => {
@@ -100,13 +108,15 @@ export default function RootLayout() {
   }, [isLoading]);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="onboarding" />
-        <Stack.Screen name="(tabs)" />
-      </Stack>
-    </GestureHandlerRootView>
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <StatusBar style="light" />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="onboarding" />
+          <Stack.Screen name="(tabs)" />
+        </Stack>
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

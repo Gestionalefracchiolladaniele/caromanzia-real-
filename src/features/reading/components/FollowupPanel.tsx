@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 import { ParticlesIcon } from '@/components/ui/ParticlesIcon';
 
@@ -24,13 +26,23 @@ interface FollowupPanelProps {
   followups: Array<{ question: string; answer: string }>;
   onAskFollowup: (question: string) => void;
   maxFollowups?: number;
+  userName?: string;
+  userAvatar?: string | null;
+  spreadName?: string;
+  musicOn?: boolean;
   ttsOn?: boolean;
   isPlaying?: boolean;
+  onToggleMusic?: () => void;
+  onToggleTts?: () => void;
   onPlayTts?: () => void;
-  onPauseTts?: () => void;
 }
 
-export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, maxFollowups = 3, ttsOn = false, isPlaying = false, onPlayTts, onPauseTts }: FollowupPanelProps) {
+export function FollowupPanel({
+  aiText, isStreaming, followups, onAskFollowup, maxFollowups = 3,
+  userName, userAvatar, spreadName,
+  musicOn, ttsOn, isPlaying,
+  onToggleMusic, onToggleTts, onPlayTts,
+}: FollowupPanelProps) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<ScrollView>(null);
   const canAsk = followups.length < maxFollowups && !isStreaming;
@@ -42,10 +54,49 @@ export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, m
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   }
 
+  const showHeader = userName !== undefined || onToggleMusic !== undefined;
+
   return (
     <View style={styles.container}>
-      {/* Divider */}
-      <View style={styles.divider} />
+      {/* Header integrato: user + audio controls (compatto, dentro la chat) */}
+      {showHeader && (
+        <View style={styles.header}>
+          {userAvatar ? (
+            <Image source={{ uri: userAvatar }} style={styles.headerAvatar} />
+          ) : (
+            <View style={styles.headerAvatarPlaceholder}>
+              <Text style={styles.headerAvatarInitial}>
+                {(userName ?? 'U').slice(0, 1).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={styles.headerUserInfo}>
+            <Text style={styles.headerUserName} numberOfLines={1}>{userName ?? 'Lettore'}</Text>
+            {spreadName && <Text style={styles.headerUserSub} numberOfLines={1}>{spreadName}</Text>}
+          </View>
+          <View style={styles.headerActions}>
+            {onToggleMusic && (
+              <Pressable onPress={onToggleMusic} style={[styles.headerIconBtn, !musicOn && styles.headerIconBtnOff]}>
+                <Svg width="13" height="13" viewBox="0 0 24 24" fill={musicOn ? '#D4AF37' : '#5a4a30'}>
+                  <Path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z" />
+                </Svg>
+              </Pressable>
+            )}
+            {onToggleTts && (
+              <Pressable onPress={onToggleTts} style={[styles.headerIconBtn, !ttsOn && styles.headerIconBtnOff]}>
+                <Svg width="13" height="13" viewBox="0 0 24 24" fill={ttsOn ? '#D4AF37' : '#5a4a30'}>
+                  <Path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z" />
+                </Svg>
+              </Pressable>
+            )}
+            {ttsOn && aiText.length > 0 && onPlayTts && (
+              <Pressable onPress={onPlayTts} style={[styles.headerIconBtn, !isPlaying && styles.headerIconBtnOff]}>
+                <Text style={styles.headerIconBtnEmoji}>{isPlaying ? '⏸' : '▶'}</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
 
       <ScrollView
         ref={scrollRef}
@@ -59,7 +110,7 @@ export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, m
           <View style={styles.aiBlock}>
             <View style={styles.bubbleWrap}>
               <View style={styles.skullIcon}>
-                <ParticlesIcon size={28} />
+                <ParticlesIcon size={24} />
               </View>
               <View style={styles.bubble}>
                 <Text style={styles.bubbleText}>{aiText}</Text>
@@ -68,16 +119,6 @@ export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, m
                 )}
               </View>
             </View>
-            {ttsOn && aiText.length > 0 && !isStreaming && (
-              <View style={styles.ttsControls}>
-                <Pressable
-                  style={[styles.ttsBtn, isPlaying && styles.ttsBtnActive]}
-                  onPress={isPlaying ? onPauseTts : onPlayTts}
-                >
-                  <Text style={styles.ttsBtnText}>{isPlaying ? '⏸ Pausa' : '🔊 Leggi'}</Text>
-                </Pressable>
-              </View>
-            )}
           </View>
         )}
 
@@ -91,7 +132,7 @@ export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, m
             {/* AI answer */}
             <View style={styles.bubbleWrap}>
               <View style={styles.skullIcon}>
-                <ParticlesIcon size={28} />
+                <ParticlesIcon size={24} />
               </View>
               <View style={styles.bubble}>
                 <Text style={styles.bubbleText}>{fu.answer}</Text>
@@ -158,31 +199,104 @@ export function FollowupPanel({ aiText, isStreaming, followups, onAskFollowup, m
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.35)',
+    backgroundColor: 'rgba(20,13,46,0.6)',
+    overflow: 'hidden',
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#D4AF37',
-    opacity: 0.3,
-    marginHorizontal: 16,
-    marginBottom: 8,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 8,
+    backgroundColor: 'rgba(36,21,80,0.7)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(212,175,55,0.25)',
+  },
+  headerAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+  },
+  headerAvatarPlaceholder: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#5a2d9a',
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarInitial: {
+    color: '#D4AF37',
+    fontSize: 13,
+    fontFamily: 'Georgia',
+    fontWeight: '700',
+  },
+  headerUserInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerUserName: {
+    color: '#F0D060',
+    fontSize: 12,
+    fontFamily: 'Georgia',
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  headerUserSub: {
+    color: '#a890c8',
+    fontSize: 9,
+    fontFamily: 'Georgia',
+    letterSpacing: 0.3,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  headerIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(90,45,154,0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconBtnOff: {
+    backgroundColor: 'rgba(36,21,80,0.4)',
+    borderColor: 'rgba(90,74,48,0.3)',
+  },
+  headerIconBtnEmoji: {
+    color: '#D4AF37',
+    fontSize: 11,
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    padding: 12,
-    gap: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 10,
     paddingBottom: 4,
   },
   bubbleWrap: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     alignItems: 'flex-start',
+    width: '100%',
   },
   skullIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#2a1050',
     borderWidth: 1,
     borderColor: '#D4AF37',
@@ -197,15 +311,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(42,16,80,0.8)',
     borderWidth: 1,
     borderColor: 'rgba(212,175,55,0.3)',
-    borderRadius: 12,
+    borderRadius: 10,
     borderTopLeftRadius: 2,
-    padding: 10,
+    padding: 8,
   },
   bubbleText: {
     color: '#e8dfc8',
     fontFamily: 'Georgia',
-    fontSize: 13,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 18,
   },
   spinner: {
     marginTop: 6,
@@ -230,7 +344,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   inputArea: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingBottom: 8,
     gap: 8,
   },
@@ -305,28 +419,5 @@ const styles = StyleSheet.create({
   },
   aiBlock: {
     gap: 8,
-  },
-  ttsControls: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 4,
-  },
-  ttsBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: 'rgba(212,175,55,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(212,175,55,0.4)',
-  },
-  ttsBtnActive: {
-    backgroundColor: 'rgba(212,175,55,0.3)',
-    borderColor: '#D4AF37',
-  },
-  ttsBtnText: {
-    color: '#D4AF37',
-    fontFamily: 'Georgia',
-    fontSize: 12,
-    fontWeight: '600',
   },
 });

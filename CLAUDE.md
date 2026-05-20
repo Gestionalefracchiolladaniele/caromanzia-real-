@@ -1,7 +1,9 @@
 # CLAUDE.md — Cartomanzia AI App
 
 App mobile tarocchi AI + vetrina cartomanti. Target: Italia.
-**Stack:** Expo 54 / RN 0.81.5 / TypeScript strict / Expo Router 6 · Supabase + Google OAuth · Zustand + React Query + Zod · MMKV via `makeStorage()` (❌ no AsyncStorage) · Gemini Flash 2.5 streaming · Reanimated 4 + Gesture Handler · `@shopify/react-native-skia` (build nativo) · RevenueCat (stub, richiede `react-native-purchases`)
+**Stack:** Expo 54 / RN 0.81.5 / TypeScript strict / Expo Router 6 · Supabase + Google OAuth · Zustand + React Query + Zod · MMKV via `makeStorage()` (❌ no AsyncStorage) · Gemini Flash 2.5 streaming · Reanimated 4 + Gesture Handler · `@shopify/react-native-skia` (build nativo) · RevenueCat (stub, richiede `react-native-purchases`) · `expo-image-picker` (avatar upload)
+
+**Dipendenze native chiave:** `react-native-nitro-modules 0.35.7` (min richiesta per MMKV 4.x su RN 0.81.5) · ❌ non compatibile con Expo Go → richiede Dev Client APK
 
 **Status:** FASE 11-16 complete. ⏳ PROSSIMO: RevenueCat nativo + share nativo + history insights.
 
@@ -204,6 +206,9 @@ src/
 - **Image path** → `@/assets/` (non path relativo, Metro resolution)
 - **Gemini cache miss** → system prompt identico byte-per-byte ogni call
 - **WebView in Expo Go** → fallback Reanimated/SVG in dev, WebView/Skia solo build nativo
+- **NitroModules not found / MMKV crash** → non compatibile con Expo Go. Richiede Dev Client APK (`eas build --profile development --platform android`). `react-native-nitro-modules >= 0.35.7` richiesto per RN 0.81.5
+- **Dev client APK non scarica bundle (404)** → porta 8081 bloccata dal firewall Windows. Fix: `netsh advfirewall firewall add rule name="Metro Bundler" dir=in action=allow protocol=TCP localport=8081` (come amministratore)
+- **development profile genera AAB** → aggiungere `"buildType": "apk"` sotto `android` nel profilo `development` di `eas.json`
 - **`useDerivedValue` in .map()** → estrarre sotto-componente
 - **jsonb[] type mismatch** → usare `jsonb` con default `'[]'::jsonb` (JS array → JSON → Postgres cast)
 - **Profile tracking** → import da `@/lib/profile-tracking` (non `daily-ritual`)
@@ -362,3 +367,45 @@ pnpm add react-native-share
 - ReadingDetail deepening — "Nuova lettura basata su questa" con context pre-populated
 - Push notification reale — Edge Function Supabase + Expo notifications (pre-build)
 - ⏳ TTS pending — `supabase functions deploy tts` + test toggle Voce
+
+## FASE 17: UI Layout + TTS Smart Logic ✅ Done
+
+**Card Reveal Ottimizzazione (Tutte le letture):**
+- **Dimensioni carte rimpicciolite:** sogni 72×120 (era 100×166), sincronia 90×150 (era 130×216), tre_carte 70×117 (era 96×160)
+- **Dorso carta migliorato:** `backOpacity` interpolates `[0, 0.45, 1] → [1, 1, 0]` (visibile più a lungo)
+- **Posizionamento:** `cardRevealPressable` con `justifyContent: 'flex-end'` + `paddingBottom: 12` — carte in basso verso user info
+- **CardReveal.container:** `justifyContent: 'flex-end'` — sfrutta spazio verticale per lasciare più room al DivineMascot sopra
+
+**DivineMascot Layout Fix:**
+- **Position assoluto:** `position: 'absolute', top: 50, left: 0, right: 0, zIndex: 20` — non occupa spazio, overlay puro
+- **Size ridotto:** width 200px (era 220-280) — compatto sopra le carte, non schiaccia il layout
+- **Sempre visibile:** revealing + interpreting su tutte le letture (non solo Celtic Cross)
+
+**Header Integrato nella Chat (Unified UI):**
+- **FollowupPanel header:** user avatar (30px) + nome/spread name + bottoni audio (26px) integrati DENTRO la chat
+- **User bar rimossa:** niente più barra esterna che sfora la cornice ovale dorata ai lati
+- **Chat container:** `marginHorizontal: 18, marginBottom: 12` per lasciare spazio ai gioielli della cornice
+- **Bottoni audio compatti:** Musica (SVG 13px) · Voce (SVG 13px) · Play/Pausa (emoji) — 3 bottoni rotondi (26px) allineati a destra dell'header
+- **Header styling:** background distinto `rgba(36,21,80,0.7)`, bordo inferiore per separazione visiva
+
+**Chat Compattata:**
+- **Font ridotto:** bubbleText 13px → **12px**, lineHeight 20 → 18
+- **Icona AI:** 28px → 24px (ParticlesIcon)
+- **Padding:** 10 → 8 orizzontale, verticale uniforme
+- **bubbleWrap:** `width: '100%'` — sfrutta tutto spazio senza margini asimmetrici
+
+**TTS Smart Logic (Migliorato):**
+- **Tracking testo parlato:** `getLastSpokenText()` + `setLastSpokenText()` per evitare re-letture
+- **Play/Pausa intelligente:** se `getLastSpokenText() === aiText` → resume (continua da dove era), altrimenti speak nuovo
+- **API key da env:** `process.env.EXPO_PUBLIC_GOOGLE_TTS_API_KEY` con fallback hardcoded
+- **Error logging:** console.error per API failures, retry logic nel loop chunk
+- **Pause funziona:** `pauseTts()` interrompe, `resumeTts()` riprende esattamente dal punto
+
+**Spread Name Unificato:**
+- **getSpreadName() / getSpreadSub():** funzioni helper in reading.tsx
+- **User bar subtitle:** tutti gli spread mostrano `"Lettura personale · NOME LETTURA"` (Celtic Cross + Tre Carte + Sogni + Sincronicità + Situazioni)
+- **Applicato ovunque:** Celtic Cross, non-Celtic, header chat — format consistente
+
+---
+
+## Prossimo (FASE 18+)
