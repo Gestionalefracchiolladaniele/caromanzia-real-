@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Dimensions, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, {
   Circle,
   Defs,
@@ -10,10 +10,14 @@ import Svg, {
   Stop,
   Text as SvgText,
 } from 'react-native-svg';
+import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
 
 import { ElaborateFrame } from '@/components/ui/ElaborateFrame';
 import { useAuthStore } from '@/lib/auth-store';
 import { supabase } from '@/lib/supabase';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get('window');
 
@@ -33,16 +37,28 @@ export default function AuthScreen() {
     if (signingIn) return;
     setSigningIn(true);
     try {
-      const redirectTo =
-        typeof window !== 'undefined' && window.location
-          ? window.location.origin
-          : 'http://localhost:8081';
+      const redirectTo = Platform.OS === 'web'
+        ? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081')
+        : makeRedirectUri({ scheme: 'cartomanzia', path: 'auth/callback' });
 
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo },
+        options: { redirectTo, skipBrowserRedirect: Platform.OS !== 'web' },
       });
-      if (error) Alert.alert('Errore login', error.message);
+      if (error) { Alert.alert('Errore login', error.message); return; }
+
+      if (Platform.OS !== 'web' && data.url) {
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+        if (result.type === 'success') {
+          const raw = result.url.includes('#') ? result.url.split('#')[1] : result.url.split('?')[1] ?? '';
+          const params = new URLSearchParams(raw);
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+          if (accessToken) {
+            await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken ?? '' });
+          }
+        }
+      }
     } catch (e: any) {
       Alert.alert('Errore', e?.message ?? 'Accesso fallito');
     } finally {

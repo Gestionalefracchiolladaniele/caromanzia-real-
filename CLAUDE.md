@@ -1,11 +1,11 @@
 # CLAUDE.md — Cartomanzia AI App
 
 App mobile tarocchi AI + vetrina cartomanti. Target: Italia.
-**Stack:** Expo 54 / RN 0.81.5 / TypeScript strict / Expo Router 6 · Supabase + Google OAuth · Zustand + React Query + Zod · MMKV via `makeStorage()` (❌ no AsyncStorage) · Gemini Flash 2.5 streaming · Reanimated 4 + Gesture Handler · `@shopify/react-native-skia` (build nativo) · RevenueCat (stub, richiede `react-native-purchases`) · `expo-image-picker` (avatar upload)
+**Stack:** Expo 54 / RN 0.81.5 / TypeScript strict / Expo Router 6 · Supabase + Google OAuth · Zustand + React Query + Zod · AsyncStorage (storage persistente, sync via cache in-memory) · Gemini Flash 2.5 streaming · Reanimated 4 + Gesture Handler · `@shopify/react-native-skia` (build nativo) · RevenueCat (stub, richiede `react-native-purchases`) · `expo-image-picker` (avatar upload) · `expo-notifications` (push + local scheduling)
 
-**Dipendenze native chiave:** `react-native-nitro-modules 0.35.7` (min richiesta per MMKV 4.x su RN 0.81.5) · ❌ non compatibile con Expo Go → richiede Dev Client APK
+**Dipendenze native chiave:** `@react-native-async-storage/async-storage@2.2.0` · `expo-notifications@~0.32.13` · ❌ non compatibile con Expo Go → richiede Dev Client APK
 
-**Status:** FASE 11-16 complete. ⏳ PROSSIMO: RevenueCat nativo + share nativo + history insights.
+**Status:** FASE 11-17 complete. ⏳ PROSSIMO: RevenueCat nativo + share nativo + history insights.
 
 ---
 
@@ -73,7 +73,7 @@ src/
 │   ├── _layout.tsx — root layout, auth gate
 │   ├── index.tsx — auth screen Google login
 │   ├── onboarding.tsx — 4-step + welcome
-│   └── (tabs)/ — _layout (RoleProvider+TabBar) · home · impostazioni · analytics · cards · reading · history · settings(legacy)
+│   └── (tabs)/ — _layout (RoleProvider+TabBar) · home · impostazioni · analytics · cards · reading · history
 ├── components/ui/ — ElaborateFrame · TitleBox · SearchBar · Chips · GoldButton · TabBar · DivineMascot · ParticlesIcon
 ├── features/ — reading/ · onboarding/ · role-provider/ · notifications/ · ping/ · home/
 ├── lib/ — supabase · auth-store · gemini · supabase-readings · profile-tracking · daily-ritual · storage · i18n · revenuecat · audio-manager · google-tts
@@ -115,7 +115,7 @@ src/
 
 **Revealing:** Carte coperte, utente tap per girare una alla volta. AI streaming in background simultaneamente. Hint: "TAP per rivelare · X/Y". Auto-transition a `interpreting` quando `revealedCount >= cards.length`. **DivineMascot SEMPRE visibile anche in interpreting con testo**. No bottone "APPROFONDISCI LA LETTURA" — accesso a followup da scripting. CardReveal: `flex: 1, justifyContent: 'center', alignItems: 'center'` per layout centrato.
 
-**MMKV Persist:** Auto-save su phase change, key `'reading_in_progress'`. `PERSISTABLE_PHASES`: questionnaire, shuffling, revealing, interpreting, followup, saving, dream_input, celtic_phase*. Campi salvati: phase, deckType, emotionalState, lifeArea, urgency, cards, revealedCount, aiText, followups, freeContext, userQuestion, dreamText, celticPhase, celticPhaseTexts. Recovery banner in deck_selection. `restoreFromStorage()` auto-popola `revealedCount`: interpreting/followup/saving/celtic_phase* → `cards.length`; revealing → `cards.length`; altre → 0. `hasPersisted()` check disponibilità.
+**AsyncStorage Persist:** Auto-save su phase change, key `'reading_in_progress'`. `PERSISTABLE_PHASES`: questionnaire, shuffling, revealing, interpreting, followup, saving, dream_input, celtic_phase*. Campi salvati: phase, deckType, emotionalState, lifeArea, urgency, cards, revealedCount, aiText, followups, freeContext, userQuestion, dreamText, celticPhase, celticPhaseTexts. Recovery banner in deck_selection. `restoreFromStorage()` auto-popola `revealedCount`: interpreting/followup/saving/celtic_phase* → `cards.length`; revealing → `cards.length`; altre → 0. `hasPersisted()` check disponibilità. Storage via `src/lib/storage.ts` — cache in-memory Map + AsyncStorage backing (API sincrona mantenuta).
 
 ---
 
@@ -144,7 +144,7 @@ src/
 
 **Colori:** BG `#140d2e` · Card `rgba(36,21,80,0.97)` · Accento `#5a2d9a` · Oro `#D4AF37` · Dim `#a890c8`
 
-**Layout pagine:** `View screen` + `ElaborateFrame` + `View inner (zIndex:5)` + `TitleBox (paddingTop:40)` + `TabBar` — ❌ no `SafeAreaView`
+**Layout pagine:** `View screen` + `ElaborateFrame` + `View inner (zIndex:5)` + `TitleBox (paddingTop:40)` + `TabBar` — ❌ no `SafeAreaView`. Root avvolto in `SafeAreaProvider` (da `_layout.tsx`) per `useSafeAreaInsets()` in ElaborateFrame.
 
 **Modal (stile NotificationCenter):** transparent + fade + overlay `rgba(10,6,25,0.92)` + container `maxWidth:480, maxHeight:'85%'`, bordo oro `#D4AF37`, `borderRadius:16`. Usato da UpgradeModal, ProfileModal, NotificationCenter.
 
@@ -202,13 +202,15 @@ src/
 
 - **Infinite re-renders** → atomic Zustand selector
 - **Animazioni lag** → `runOnJS` per setState in worklet
-- **MMKV web** → `makeStorage()`
 - **Image path** → `@/assets/` (non path relativo, Metro resolution)
 - **Gemini cache miss** → system prompt identico byte-per-byte ogni call
 - **WebView in Expo Go** → fallback Reanimated/SVG in dev, WebView/Skia solo build nativo
-- **NitroModules not found / MMKV crash** → non compatibile con Expo Go. Richiede Dev Client APK (`eas build --profile development --platform android`). `react-native-nitro-modules >= 0.35.7` richiesto per RN 0.81.5
 - **Dev client APK non scarica bundle (404)** → porta 8081 bloccata dal firewall Windows. Fix: `netsh advfirewall firewall add rule name="Metro Bundler" dir=in action=allow protocol=TCP localport=8081` (come amministratore)
 - **development profile genera AAB** → aggiungere `"buildType": "apk"` sotto `android` nel profilo `development` di `eas.json`
+- **AsyncStorage version mismatch** → Expo SDK 54 richiede `@react-native-async-storage/async-storage@2.2.0`. Verificare con `npx expo install --check` e accettare il fix proposto. NON installare 3.x manualmente.
+- **Storage non ancora pronto al mount** → `initCache()` in `storage.ts` è async. In `_layout.tsx` attendere `cacheReady` prima di avviare `supabase.auth.onAuthStateChange` (gate con `useState` + `useEffect`). Senza il gate i valori letti da Storage possono essere vuoti.
+- **ElaborateFrame clip su device con gesture bar/notch** → usare `useSafeAreaInsets()` per calcolare `width/height` effettivi. SVG posizionato con `top: insets.top, left: insets.left`. Richiede `SafeAreaProvider` in `_layout.tsx`.
+- **splash.png colorType invalido (jimp durante prebuild)** → `jimp` usato da Expo durante prebuild rifiuta PNG con colorType non standard. Rigenerare con `sharp`: 1080×1920, RGBA (colorType 6), sfondo `#140d2e`, icona centrata 300px.
 - **`useDerivedValue` in .map()** → estrarre sotto-componente
 - **jsonb[] type mismatch** → usare `jsonb` con default `'[]'::jsonb` (JS array → JSON → Postgres cast)
 - **Profile tracking** → import da `@/lib/profile-tracking` (non `daily-ritual`)
@@ -240,7 +242,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=<token>
 EXPO_PUBLIC_GEMINI_API_KEY=<set tu>
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID / IOS / ANDROID=<set tu>
 EXPO_PUBLIC_REVENUECAT_IOS_KEY / ANDROID_KEY=<set tu>
-GOOGLE_TTS_API_KEY=<set in Supabase edge functions secrets>
+EXPO_PUBLIC_GOOGLE_TTS_API_KEY=<key Google TTS — letta da google-tts.ts in dev>
+GOOGLE_TTS_API_KEY=<set in Supabase edge functions secrets — per prod Edge Function>
 ```
 
 ---
@@ -408,4 +411,33 @@ pnpm add react-native-share
 
 ---
 
-## Prossimo (FASE 18+)
+## FASE 18: Storage Migration + Build Fix + ElaborateFrame Responsive ✅ Done
+
+**Storage: MMKV → AsyncStorage**
+- Rimossi `react-native-mmkv` e `react-native-nitro-modules` (incompatibili su alcuni device Android, crash runtime "MMKV class undefined").
+- `src/lib/storage.ts` ora usa cache in-memory `Map<string,string>` + AsyncStorage backing. API pubblica identica (getString/set/delete/contains) → zero modifiche a `reading-store.ts` e `i18n.ts`.
+- `KEYS` pre-caricati all'avvio: `['cartomanzia.lang', 'reading_in_progress']`. Chiamata `initCache()` esportata + richiamata in `_layout.tsx`.
+- `src/lib/supabase.ts` ora usa `AsyncStorage` direttamente (rimossa dipendenza MMKV).
+
+**_layout.tsx: SafeAreaProvider + initCache gate**
+- Aggiunto `SafeAreaProvider` come wrapper root (necessario per `useSafeAreaInsets()` in ElaborateFrame e futuri componenti).
+- Aggiunto `cacheReady` state: `supabase.auth.onAuthStateChange` parte solo dopo che `initCache()` si completa, evitando letture Storage vuote durante l'auth init.
+
+**ElaborateFrame: Fix responsive per notch/gesture bar**
+- Usa `useSafeAreaInsets()` per calcolare `width/height` dell'area disegnabile effettiva.
+- SVG posizionato con `top: insets.top, left: insets.left` → cornice si adatta a qualsiasi device (notch, gesture bar Android, Dynamic Island).
+
+**File rimossi (obsoleti)**
+- `src/app/(tabs)/readings.tsx` — placeholder "FASE 4E" non più referenziato
+- `src/app/(tabs)/settings.tsx` — rimpiazzato da `impostazioni.tsx`
+- `assets/skeleton-reading.png`, `assets/tunnel-bg.png`, `assets/auth-bg.png` — PNG corrotti non referenziati nel codice
+- `TabId` ripulito: rimossi `'readings'` e `'settings'` obsoleti
+
+**EAS Build Fix**
+- `assets/splash.png` rigenerato con `sharp` (1080×1920, colorType RGBA) — `jimp` usato da Expo prebuild rifiuta colorType non standard.
+- Pacchetti aggiornati: `@react-native-async-storage/async-storage@2.2.0` (versione corretta per SDK 54), `expo-notifications@~0.32.13`.
+- `eas.json` profilo `development`: `"buildType": "apk"` + `"developmentClient": true` per Dev Client APK (non AAB).
+
+---
+
+## Prossimo (FASE 19+)
